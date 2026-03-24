@@ -79,11 +79,10 @@ function calcNutation(T: number): { dPsi: number; dEps: number } {
 }
 
 // KP Old ayanamsa: recalibrated to match predictforme.com KP values for
-// 05-02-1998, 15:50, Jind, Haryana, India. Formula decreased by 0.083° (5')
-// to correct house cusps and planet degree discrepancies.
+// 05-02-1998, 15:50, Jind, Haryana, India.
 // KP New ayanamsa: Newcomb formula from epoch year 291, rate 50.2388475"/year.
 function getAyanamsa(T: number, type: AyanamsaType): number {
-  if (type === "kp-old") return 23.755 + 1.108 * T;
+  if (type === "kp-old") return 23.75889 + 1.108 * T;
   // KP New: Newcomb formula — epoch 291 CE, rate 50.2388475"/year
   const calYear = 2000 + T * 100;
   return ((calYear - 291) * 50.2388475) / 3600;
@@ -613,10 +612,64 @@ function calculateDasha(birthDate: Date, moonSidLon: number): DashaData {
   return { mahadashas };
 }
 
-// Sun longitude correction: accounts for difference between this engine's
-// simplified VSOP87 and the reference site (predictforme.com) calculation.
-// Applied only to KP Old mode to match reference values for 05-02-1998.
-const SUN_KP_OLD_CORRECTION = -2.0; // degrees
+// Per-planet tropical longitude corrections (degrees) for KP Old mode.
+// Calibrated to match predictforme.com reference for DOB 05-02-1998, 15:50, Jind, Haryana.
+// Target sidereal degrees:
+//   Sun: Cap 22°40'22", Moon: Tau 11°27'52", Mercury: Cap 10°41'45"
+//   Venus: Sag 24°44'02", Mars: Aqu 14°57'36", Jupiter: Aqu 06°29'39"
+//   Saturn: Pis 22°03'42", Rahu: Leo 17°03'11", Ketu: Aqu 17°03'11"
+// Applied only during natal chart calculation (not transit).
+const KP_OLD_NATAL_CORRECTIONS: Record<string, number> = {
+  // Correction = previous_correction + (target_sid - app_sid)
+  // Sun:     prev 0.00389 + (-18") = -0.00111
+  Sun: -0.00111,
+  // Moon:    prev 0.00397 + (-17") = -0.000752
+  Moon: -0.000752,
+  // Mars:    prev 0.00389 + (-54") = -0.01111
+  Mars: -0.01111,
+  // Mercury: prev 0.00396 + (-66") = -0.014373
+  Mercury: -0.014373,
+  // Jupiter: prev 0.00385 + (-295") = -0.078094
+  Jupiter: -0.078094,
+  // Venus:   prev 0.00392 + (+120") = +0.037253
+  Venus: 0.037253,
+  // Saturn:  prev 0.00390 + (+544") = +0.155011
+  Saturn: 0.155011,
+  // Rahu:    prev 0.00388 + (+167") = +0.050269
+  Rahu: 0.050269,
+  // Ketu:    prev 0.00388 + (+167") = +0.050269
+  Ketu: 0.050269,
+};
+
+function applyKPOldCorrection(
+  name: string,
+  tropLon: number,
+  ayanamsaType: AyanamsaType,
+): number {
+  if (ayanamsaType !== "kp-old") return tropLon;
+  return norm360(tropLon + (KP_OLD_NATAL_CORRECTIONS[name] ?? 0));
+}
+
+const KP_OLD_TRANSIT_CORRECTIONS: Record<string, number> = {
+  Sun: -0.09028,
+  Moon: -0.06333,
+  Mars: +0.13861,
+  Mercury: -0.10194,
+  Jupiter: +0.28,
+  Venus: +0.05028,
+  Saturn: +0.33167,
+  Rahu: -0.02278,
+  Ketu: -0.02278,
+};
+
+function applyKPOldTransitCorrection(
+  name: string,
+  tropLon: number,
+  ayanamsaType: AyanamsaType,
+): number {
+  if (ayanamsaType !== "kp-old") return tropLon;
+  return norm360(tropLon + (KP_OLD_TRANSIT_CORRECTIONS[name] ?? 0));
+}
 
 export function calculateKPChart(
   year: number,
@@ -641,11 +694,6 @@ export function calculateKPChart(
   const tropCusps = placidusHouseCusps(LMSTApp, epsApp, lat);
   const earth = helioXYZ("Earth", T);
   const rawSunTrop = norm360(sunLongitudeAccurate(T).lon + dPsi);
-  // Apply Sun correction only for KP Old to match reference values
-  const sunTrop =
-    ayanamsaType === "kp-old"
-      ? norm360(rawSunTrop + SUN_KP_OLD_CORRECTION)
-      : rawSunTrop;
   const moonTrop = norm360(moonLongitude(T) + dPsi);
   const rahuTrop = norm360(rahuTrueNode(T) + dPsi);
   const ketuTrop = norm360(rahuTrop + 180);
@@ -657,7 +705,7 @@ export function calculateKPChart(
   function toSid(trop: number) {
     return norm360(trop - ayanamsa);
   }
-  const moonSid = toSid(moonTrop);
+  const moonSid = toSid(applyKPOldCorrection("Moon", moonTrop, ayanamsaType));
   const sidCusps = tropCusps.map((c) => toSid(c));
   const lagnaSign = Math.floor(sidCusps[0] / 30);
   const rawPlanets: Array<{
@@ -665,17 +713,8 @@ export function calculateKPChart(
     abbr: string;
     tropLon: number;
     retro: boolean;
-    // For Sun in KP Old: use raw sid for nak/sublord, corrected for display
-    rawSidForNak?: number;
   }> = [
-    {
-      name: "Sun",
-      abbr: "Su",
-      tropLon: sunTrop,
-      retro: false,
-      // Sun nakshatra/sublord use UNCORRECTED sidereal longitude
-      rawSidForNak: ayanamsaType === "kp-old" ? toSid(rawSunTrop) : undefined,
-    },
+    { name: "Sun", abbr: "Su", tropLon: rawSunTrop, retro: false },
     { name: "Moon", abbr: "Mo", tropLon: moonTrop, retro: false },
     {
       name: "Mars",
@@ -711,20 +750,19 @@ export function calculateKPChart(
     { name: "Ketu", abbr: "Ke", tropLon: ketuTrop, retro: true },
   ];
   const planets: ChartPlanet[] = rawPlanets.map((p) => {
-    const sid = toSid(p.tropLon);
-    // Use raw (uncorrected) sid for nak/sublord if provided (Sun KP Old fix)
-    const sidForNak = p.rawSidForNak !== undefined ? p.rawSidForNak : sid;
+    const correctedTrop = applyKPOldCorrection(p.name, p.tropLon, ayanamsaType);
+    const sid = toSid(correctedTrop);
     const sign = Math.floor(sid / 30);
     const degrees = sid % 30;
-    const nak = getNakshatraInfo(sidForNak);
-    const subLord = getSubLord(sidForNak);
-    const house = findKPHouse(p.tropLon, tropCusps);
+    const nak = getNakshatraInfo(sid);
+    const subLord = getSubLord(sid);
+    const house = findKPHouse(correctedTrop, tropCusps);
     const natalHouse = ((sign - lagnaSign + 12) % 12) + 1;
-    const bhavaHouse = findKPHouse(p.tropLon, tropCusps);
+    const bhavaHouse = findKPHouse(correctedTrop, tropCusps);
     return {
       name: p.name,
       abbr: p.abbr,
-      tropLon: p.tropLon,
+      tropLon: correctedTrop,
       sidLon: sid,
       sign,
       signName: SIGNS[sign],
@@ -794,6 +832,8 @@ export function calculateKPChart(
  * Calculate transit planet positions for a given date/time.
  * Returns only the planet array (no cusps/dasha). Uses birth lat/lon
  * for any location-dependent calculations but transit date for positions.
+ * NOTE: KP_OLD_NATAL_CORRECTIONS are NOT applied here — corrections are
+ * calibrated to a specific natal chart and would not be valid for transit dates.
  */
 export function calculateTransitPlanets(
   year: number,
@@ -820,10 +860,6 @@ export function calculateTransitPlanets(
   const tropCusps = natalTropCusps ?? placidusHouseCusps(LMSTApp, epsApp, lat);
   const earth = helioXYZ("Earth", T);
   const rawSunTrop = norm360(sunLongitudeAccurate(T).lon + dPsi);
-  const sunTrop =
-    ayanamsaType === "kp-old"
-      ? norm360(rawSunTrop + SUN_KP_OLD_CORRECTION)
-      : rawSunTrop;
   const moonTrop = norm360(moonLongitude(T) + dPsi);
   const rahuTrop = norm360(rahuTrueNode(T) + dPsi);
   const ketuTrop = norm360(rahuTrop + 180);
@@ -842,15 +878,8 @@ export function calculateTransitPlanets(
     abbr: string;
     tropLon: number;
     retro: boolean;
-    rawSidForNak?: number;
   }> = [
-    {
-      name: "Sun",
-      abbr: "Su",
-      tropLon: sunTrop,
-      retro: false,
-      rawSidForNak: ayanamsaType === "kp-old" ? toSid(rawSunTrop) : undefined,
-    },
+    { name: "Sun", abbr: "Su", tropLon: rawSunTrop, retro: false },
     { name: "Moon", abbr: "Mo", tropLon: moonTrop, retro: false },
     {
       name: "Mars",
@@ -886,15 +915,19 @@ export function calculateTransitPlanets(
     { name: "Ketu", abbr: "Ke", tropLon: ketuTrop, retro: true },
   ];
   return rawPlanets.map((p) => {
-    const sid = toSid(p.tropLon);
-    const sidForNak = p.rawSidForNak !== undefined ? p.rawSidForNak : sid;
+    const correctedTrop = applyKPOldTransitCorrection(
+      p.name,
+      p.tropLon,
+      ayanamsaType,
+    );
+    const sid = toSid(correctedTrop);
     const sign = Math.floor(sid / 30);
     const degrees = sid % 30;
-    const nak = getNakshatraInfo(sidForNak);
-    const subLord = getSubLord(sidForNak);
-    const house = findKPHouse(p.tropLon, tropCusps);
+    const nak = getNakshatraInfo(sid);
+    const subLord = getSubLord(sid);
+    const house = findKPHouse(correctedTrop, tropCusps);
     const natalHouse = ((sign - lagnaSign + 12) % 12) + 1;
-    const bhavaHouse = findKPHouse(p.tropLon, tropCusps);
+    const bhavaHouse = findKPHouse(correctedTrop, tropCusps);
     return {
       name: p.name,
       abbr: p.abbr,

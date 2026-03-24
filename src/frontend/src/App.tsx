@@ -1,4 +1,5 @@
 import DashaSection from "@/components/DashaSection";
+import EventAnalysis from "@/components/EventAnalysis";
 import NadiNumbers from "@/components/NadiNumbers";
 import NorthIndianChart from "@/components/NorthIndianChart";
 import { Badge } from "@/components/ui/badge";
@@ -25,7 +26,7 @@ import {
   calculateTransitPlanets,
   formatDeg,
 } from "@/lib/kpEngine";
-import { Loader2, MapPin, RefreshCw, Star } from "lucide-react";
+import { Download, Loader2, MapPin, RefreshCw, Star } from "lucide-react";
 import { motion } from "motion/react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -47,7 +48,7 @@ const DEFAULT_FORM: FormState = {
   lat: "19.0760",
   lon: "72.8777",
   tz: "5.5",
-  ayanamsa: "kp-new",
+  ayanamsa: "kp-old",
 };
 
 function todayString(): string {
@@ -120,7 +121,7 @@ export default function App() {
         form.ayanamsa,
       );
       setResult(chart);
-      setTransitPlanets(null); // reset transit when new natal is calculated
+      setTransitPlanets(null);
       setTimeout(() => {
         document
           .getElementById("chart-result")
@@ -144,7 +145,6 @@ export default function App() {
       const lat = Number.parseFloat(form.lat);
       const lon = Number.parseFloat(form.lon);
       const tz = Number.parseFloat(form.tz);
-      // Pass natal trop cusps so transit planets are placed in natal houses
       const natalTropCusps = result.cusps.map((c) => c.tropLon);
       const tp = calculateTransitPlanets(
         y,
@@ -168,11 +168,301 @@ export default function App() {
     }
   };
 
+  // Adjust transit date/time by given minutes delta
+  const adjustTransitTime = (minutesDelta: number) => {
+    const [y, mo, d] = transitDate.split("-").map(Number);
+    const [hr, mn] = transitTime.split(":").map(Number);
+    const dt = new Date(y, mo - 1, d, hr, mn);
+    dt.setMinutes(dt.getMinutes() + minutesDelta);
+    const newDate = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+    const newTime = `${String(dt.getHours()).padStart(2, "0")}:${String(dt.getMinutes()).padStart(2, "0")}`;
+    setTransitDate(newDate);
+    setTransitTime(newTime);
+    // Auto-recalculate if transit was already calculated
+    if (transitPlanets !== null && result) {
+      try {
+        const lat = Number.parseFloat(form.lat);
+        const lon = Number.parseFloat(form.lon);
+        const tz = Number.parseFloat(form.tz);
+        const natalTropCusps = result.cusps.map((c) => c.tropLon);
+        const tp = calculateTransitPlanets(
+          dt.getFullYear(),
+          dt.getMonth() + 1,
+          dt.getDate(),
+          dt.getHours(),
+          dt.getMinutes(),
+          lat,
+          lon,
+          tz,
+          result.ayanamsaType,
+          natalTropCusps,
+        );
+        setTransitPlanets(tp);
+      } catch (e) {
+        toast.error(
+          `Transit error: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      }
+    }
+  };
+
+  const handleDownload = () => {
+    if (!result) return;
+
+    const planetRows = [...result.planets, result.ascendant]
+      .map(
+        (p) =>
+          `  ${p.name.padEnd(12)} ${p.signName.padEnd(14)} ${formatDeg(p.degrees).padEnd(14)} ${(p.nakshatra || "").padEnd(20)} ${String(p.pada).padEnd(5)} ${(p.nakshatraLord || "").padEnd(10)} ${(p.subLord || "").padEnd(10)} H${p.natalHouse}  H${p.bhavaHouse}  ${p.retrograde ? "R" : ""}`,
+      )
+      .join("\n");
+
+    const cuspRows = result.cusps
+      .map(
+        (c) =>
+          `  H${String(c.house).padEnd(3)} ${c.signName.padEnd(14)} ${formatDeg(c.degrees).padEnd(14)} ${(c.nakshatra || "").padEnd(20)} ${String(c.pada).padEnd(5)} ${(c.nakshatraLord || "").padEnd(10)} ${c.subLord || ""}`,
+      )
+      .join("\n");
+
+    // Vimshottari Dasa section
+    const now = new Date();
+    const formatDate = (d: Date) => d.toISOString().slice(0, 10);
+    let dasaSection = `\nVimshottari Dasa System:\n${"-".repeat(80)}\n`;
+    for (const md of result.dasha.mahadashas) {
+      const mdActive = md.startDate <= now && now < md.endDate;
+      dasaSection += `  ${md.lord.padEnd(10)} ${formatDate(md.startDate)} – ${formatDate(md.endDate)}${mdActive ? "  << ACTIVE" : ""}\n`;
+      if (mdActive && md.antardashas) {
+        for (const ad of md.antardashas) {
+          const adActive = ad.startDate <= now && now < ad.endDate;
+          dasaSection += `    ${ad.lord.padEnd(10)} ${formatDate(ad.startDate)} – ${formatDate(ad.endDate)}${adActive ? "  << ACTIVE" : ""}\n`;
+          if (adActive && ad.pratyantars) {
+            for (const pt of ad.pratyantars) {
+              const ptActive = pt.startDate <= now && now < pt.endDate;
+              dasaSection += `      ${pt.lord.padEnd(10)} ${formatDate(pt.startDate)} – ${formatDate(pt.endDate)}${ptActive ? "  << ACTIVE" : ""}\n`;
+            }
+          }
+        }
+      }
+    }
+
+    // Event Analysis section
+    const eventRules: Array<{
+      en: string;
+      hi: string;
+      good: number[];
+      supporter: number[];
+      bad: number[];
+      supporterBad: number[];
+    }> = [
+      {
+        en: "Education",
+        hi: "शिक्षा",
+        good: [2, 4, 5, 9, 11],
+        supporter: [],
+        bad: [6, 8, 12],
+        supporterBad: [],
+      },
+      {
+        en: "Career",
+        hi: "करियर",
+        good: [10, 11],
+        supporter: [],
+        bad: [6, 8, 12],
+        supporterBad: [],
+      },
+      {
+        en: "Travel",
+        hi: "यात्रा",
+        good: [3, 9, 12],
+        supporter: [7],
+        bad: [],
+        supporterBad: [],
+      },
+      {
+        en: "Marriage",
+        hi: "विवाह",
+        good: [2, 7, 11],
+        supporter: [5, 9],
+        bad: [1, 6, 10],
+        supporterBad: [8, 12],
+      },
+      {
+        en: "Health",
+        hi: "स्वास्थ्य",
+        good: [5, 9, 11],
+        supporter: [],
+        bad: [6, 8, 12],
+        supporterBad: [],
+      },
+      {
+        en: "Litigation",
+        hi: "मुकदमा",
+        good: [10, 11],
+        supporter: [5, 9],
+        bad: [6, 8, 12],
+        supporterBad: [],
+      },
+      {
+        en: "Child Birth",
+        hi: "संतान",
+        good: [2, 5, 9, 11],
+        supporter: [],
+        bad: [1, 4, 10],
+        supporterBad: [],
+      },
+      {
+        en: "Nature",
+        hi: "स्वभाव",
+        good: [2, 5, 9, 11],
+        supporter: [],
+        bad: [6, 8, 12],
+        supporterBad: [],
+      },
+    ];
+
+    const nadiNums = calculateNadiNumbers(
+      result.planets,
+      result.ascendant.sign,
+    );
+
+    function classifyNums(nums: number[], rule: (typeof eventRules)[0]) {
+      const good: number[] = [];
+      const supporter: number[] = [];
+      const bad: number[] = [];
+      const supporterBad: number[] = [];
+      const neutral: number[] = [];
+      for (const n of nums) {
+        if (rule.good.includes(n)) good.push(n);
+        else if (rule.supporter.includes(n)) supporter.push(n);
+        else if (rule.bad.includes(n)) bad.push(n);
+        else if (rule.supporterBad.includes(n)) supporterBad.push(n);
+        else neutral.push(n);
+      }
+      return { good, supporter, bad, supporterBad, neutral };
+    }
+
+    let eventSection = `\nEvent Analysis (House Classifications):\n${"=".repeat(80)}\n`;
+    for (const ev of eventRules) {
+      eventSection += `\n${ev.en} / ${ev.hi}\n`;
+      eventSection += `  House Rules -> Good: [${ev.good.join(",")}]${ev.supporter.length ? `  Supporter: [${ev.supporter.join(",")}]` : ""}  Bad: [${ev.bad.join(",")}]${ev.supporterBad.length ? `  Supporter of Bad: [${ev.supporterBad.join(",")}]` : ""}\n`;
+      eventSection += `  ${"Planet".padEnd(10)} ${"Houses".padEnd(20)} ${"Good".padEnd(15)} ${"Supporter".padEnd(15)} ${"Bad".padEnd(15)} ${"Sup.Bad".padEnd(12)} Neutral\n`;
+      eventSection += `  ${"-".repeat(95)}\n`;
+      for (const row of nadiNums) {
+        const rows = [
+          { label: row.planet.name, nums: row.planet.numbers },
+          { label: row.nakLord.name, nums: row.nakLord.numbers },
+          { label: row.subLord.name, nums: row.subLord.numbers },
+        ];
+        for (const r of rows) {
+          const c = classifyNums(r.nums, ev);
+          eventSection += `  ${r.label.padEnd(10)} ${r.nums.join(",").padEnd(20)} ${c.good.join(",").padEnd(15)} ${c.supporter.join(",").padEnd(15)} ${c.bad.join(",").padEnd(15)} ${c.supporterBad.join(",").padEnd(12)} ${c.neutral.join(",")}\n`;
+        }
+      }
+    }
+
+    let transitSection = "";
+    if (transitPlanets) {
+      const transitRows = transitPlanets
+        .map(
+          (p) =>
+            `  ${p.name.padEnd(12)} ${p.signName.padEnd(14)} ${formatDeg(p.degrees).padEnd(14)} ${(p.nakshatra || "").padEnd(20)} ${(p.nakshatraLord || "").padEnd(10)} ${(p.subLord || "").padEnd(10)} H${p.natalHouse}  ${p.retrograde ? "R" : ""}`,
+        )
+        .join("\n");
+      transitSection = `\nTransit Details:\n  Date: ${transitDate}  Time: ${transitTime}\n\nTransit Planets:\n${"-".repeat(80)}\n  Planet       Sign           Degree         Nakshatra            Nak Lord   Sub Lord   Natal H  R\n${transitRows}\n`;
+    }
+
+    const report = [
+      "KP Astrology Calculator - Chart Report",
+      "=======================================",
+      "",
+      "Birth Details:",
+      `  Date:      ${form.date}`,
+      `  Time:      ${form.time}`,
+      `  Place:     ${form.place}`,
+      `  Latitude:  ${form.lat}  Longitude: ${form.lon}`,
+      `  UTC Offset: ${form.tz}`,
+      `  Ayanamsa:  KP Old (${result.ayanamsa.toFixed(4)}°)`,
+      "",
+      `Ascendant: ${result.ascendant.signName} ${formatDeg(result.ascendant.degrees)}`,
+      "",
+      "Planet Details:",
+      "-".repeat(80),
+      "  Planet       Sign           Degree         Nakshatra            Pada  Nak Lord   Sub Lord   Natal H  Bhava H  R",
+      planetRows,
+      "",
+      "House Cusps:",
+      "-".repeat(80),
+      "  House Sign           Degree         Nakshatra            Pada  Nak Lord   Sub Lord",
+      cuspRows,
+      transitSection,
+      dasaSection,
+      eventSection,
+      "",
+      `Generated: ${new Date().toLocaleString()}`,
+    ].join("\n");
+
+    const blob = new Blob([report], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `kp-chart-${form.date}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast.success("Chart report downloaded!");
+  };
+
   const handleReset = () => {
     setResult(null);
     setForm(DEFAULT_FORM);
     setTransitPlanets(null);
   };
+
+  const adjustBirthTime = (deltaMinutes: number) => {
+    const [y, m, d] = form.date.split("-").map(Number);
+    const [hr, min] = form.time.split(":").map(Number);
+    const totalMinutes = hr * 60 + min + deltaMinutes;
+    const dayShift = Math.floor(totalMinutes / 1440);
+    const clampedMinutes = ((totalMinutes % 1440) + 1440) % 1440;
+    const newHr = Math.floor(clampedMinutes / 60);
+    const newMin = clampedMinutes % 60;
+    const date = new Date(y, m - 1, d + dayShift);
+    const newDate = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+    const newTime = `${String(newHr).padStart(2, "0")}:${String(newMin).padStart(2, "0")}`;
+    setForm((prev) => ({ ...prev, date: newDate, time: newTime }));
+    try {
+      const lat = Number.parseFloat(form.lat);
+      const lon = Number.parseFloat(form.lon);
+      const tz = Number.parseFloat(form.tz);
+      const chart = calculateKPChart(
+        date.getFullYear(),
+        date.getMonth() + 1,
+        date.getDate(),
+        newHr,
+        newMin,
+        lat,
+        lon,
+        tz,
+        form.ayanamsa,
+      );
+      setResult(chart);
+    } catch (e) {
+      toast.error(
+        `Calculation error: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  };
+
+  const TIME_STEPS = [
+    { label: "−1d", delta: -1440 },
+    { label: "−1h", delta: -60 },
+    { label: "−10m", delta: -10 },
+    { label: "−1m", delta: -1 },
+    { label: "+1m", delta: 1 },
+    { label: "+10m", delta: 10 },
+    { label: "+1h", delta: 60 },
+    { label: "+1d", delta: 1440 },
+  ];
 
   return (
     <div
@@ -214,7 +504,7 @@ export default function App() {
 
       <main className="flex-1 max-w-7xl mx-auto w-full px-4 py-6">
         <Tabs defaultValue="horoscope" className="space-y-4">
-          <TabsList className="grid grid-cols-3 w-full max-w-md">
+          <TabsList className="grid grid-cols-4 w-full max-w-xl">
             <TabsTrigger data-ocid="horoscope.tab" value="horoscope">
               Horoscope
             </TabsTrigger>
@@ -223,6 +513,15 @@ export default function App() {
             </TabsTrigger>
             <TabsTrigger data-ocid="transit.tab" value="transit">
               Transit
+            </TabsTrigger>
+            <TabsTrigger
+              data-ocid="events.tab"
+              value="events"
+              style={{
+                fontFamily: "Noto Sans Devanagari, system-ui, sans-serif",
+              }}
+            >
+              घटनाएं / Events
             </TabsTrigger>
           </TabsList>
 
@@ -245,23 +544,9 @@ export default function App() {
                   <span className="text-sm text-muted-foreground font-medium">
                     Ayanamsa:
                   </span>
-                  <div className="flex rounded-lg overflow-hidden border border-border">
-                    {(["kp-new", "kp-old"] as AyanamsaType[]).map((v) => (
-                      <button
-                        key={v}
-                        type="button"
-                        data-ocid="ayanamsa.toggle"
-                        onClick={() => updateForm("ayanamsa", v)}
-                        className={`px-4 py-1.5 text-xs font-semibold transition-colors ${
-                          form.ayanamsa === v
-                            ? "bg-primary text-primary-foreground"
-                            : "bg-card text-muted-foreground hover:bg-accent"
-                        }`}
-                      >
-                        {v === "kp-new" ? "KP New" : "KP Old"}
-                      </button>
-                    ))}
-                  </div>
+                  <span className="px-4 py-1.5 text-xs font-semibold bg-primary text-primary-foreground rounded-lg">
+                    KP Old
+                  </span>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -415,33 +700,110 @@ export default function App() {
                 transition={{ duration: 0.5 }}
                 className="space-y-5"
               >
-                {/* Info bar */}
-                <div className="rounded-xl border border-border bg-card px-4 py-3 flex flex-wrap items-center gap-3">
-                  <div className="flex items-center gap-2">
-                    <Star className="w-4 h-4 text-primary" />
-                    <span className="text-sm font-medium">
-                      {form.date} · {form.time} · {form.place}
+                {/* Full birth details info card */}
+                <div className="rounded-xl border border-border bg-card px-4 py-3 space-y-2">
+                  <div className="flex flex-wrap items-start gap-x-6 gap-y-1.5">
+                    <div className="flex items-center gap-1.5">
+                      <Star className="w-3.5 h-3.5 text-primary shrink-0" />
+                      <span className="text-xs text-muted-foreground">
+                        DOB:
+                      </span>
+                      <span className="text-xs font-semibold">{form.date}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs text-muted-foreground">
+                        Time:
+                      </span>
+                      <span className="text-xs font-semibold">{form.time}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs text-muted-foreground">
+                        Place:
+                      </span>
+                      <span className="text-xs font-semibold">
+                        {form.place}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs text-muted-foreground">
+                        Lat:
+                      </span>
+                      <span className="text-xs font-semibold">{form.lat}</span>
+                      <span className="text-xs text-muted-foreground">·</span>
+                      <span className="text-xs text-muted-foreground">
+                        Lon:
+                      </span>
+                      <span className="text-xs font-semibold">{form.lon}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs text-muted-foreground">
+                        UTC:
+                      </span>
+                      <span className="text-xs font-semibold">{form.tz}</span>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge
+                      variant="secondary"
+                      className="bg-amber-100 text-amber-800 border-amber-300 text-xs"
+                    >
+                      ASC: {result.ascendant.signName}{" "}
+                      {formatDeg(result.ascendant.degrees)}
+                    </Badge>
+                    <Badge
+                      variant="secondary"
+                      className="bg-amber-100 text-amber-800 border-amber-300 text-xs"
+                    >
+                      Ayanamsa: {result.ayanamsa.toFixed(4)}° (KP Old)
+                    </Badge>
+                    <Button
+                      data-ocid="download.button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleDownload}
+                      className="ml-auto text-xs border-primary/40 hover:bg-primary/10 flex items-center gap-1.5"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      Download Report
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Birth Time Adjustment Controls */}
+                <div className="rounded-xl border border-primary/30 bg-card px-4 py-3 space-y-2">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-xs font-semibold text-foreground">
+                      Adjust Birth Time
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      Current: {form.date} {form.time}
                     </span>
                   </div>
-                  <Badge
-                    variant="secondary"
-                    className="bg-amber-100 text-amber-800 border-amber-300"
-                  >
-                    ASC: {result.ascendant.signName}{" "}
-                    {formatDeg(result.ascendant.degrees)}
-                  </Badge>
-                  <Badge
-                    variant="secondary"
-                    className="bg-amber-100 text-amber-800 border-amber-300"
-                  >
-                    Ayanamsa: {result.ayanamsa.toFixed(4)}°
-                  </Badge>
-                  <Badge
-                    variant="secondary"
-                    className="bg-amber-100 text-amber-800 border-amber-300"
-                  >
-                    {result.ayanamsaType === "kp-new" ? "KP New" : "KP Old"}
-                  </Badge>
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      { label: "−1d", delta: -1440 },
+                      { label: "−1h", delta: -60 },
+                      { label: "−10m", delta: -10 },
+                      { label: "−1m", delta: -1 },
+                      { label: "+1m", delta: 1 },
+                      { label: "+10m", delta: 10 },
+                      { label: "+1h", delta: 60 },
+                      { label: "+1d", delta: 1440 },
+                    ].map((step) => (
+                      <button
+                        key={step.label}
+                        type="button"
+                        onClick={() => adjustBirthTime(step.delta)}
+                        className={`px-3 py-1.5 text-xs font-semibold rounded-md border transition-colors ${
+                          step.delta > 0
+                            ? "bg-emerald-50 text-emerald-700 border-emerald-300 hover:bg-emerald-100"
+                            : "bg-rose-50 text-rose-700 border-rose-300 hover:bg-rose-100"
+                        }`}
+                      >
+                        {step.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
                 {/* Two charts side by side */}
@@ -713,29 +1075,66 @@ export default function App() {
                         className="w-32"
                       />
                     </div>
-                    <Button
-                      data-ocid="transit.primary_button"
-                      onClick={handleTransitCalculate}
-                      disabled={isTransitCalc}
-                      className="text-sm font-semibold"
-                      style={{
-                        background: "oklch(var(--primary))",
-                        color: "oklch(var(--primary-foreground))",
-                      }}
-                    >
-                      {isTransitCalc ? (
-                        <>
-                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                          Calculating...
-                        </>
-                      ) : (
-                        <>
-                          <Star className="w-4 h-4 mr-2" />
-                          Calculate Transit
-                        </>
-                      )}
-                    </Button>
                   </div>
+
+                  {/* Time step buttons */}
+                  <div className="space-y-2">
+                    <Label className="text-xs text-muted-foreground font-medium">
+                      Quick Adjust / Time Steps
+                    </Label>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {TIME_STEPS.slice(0, 4).map((step) => (
+                        <Button
+                          key={step.label}
+                          variant="outline"
+                          size="sm"
+                          data-ocid="transit.secondary_button"
+                          onClick={() => adjustTransitTime(step.delta)}
+                          className="h-7 px-2.5 text-xs font-mono border-red-300 text-red-700 hover:bg-red-50 hover:border-red-400"
+                        >
+                          {step.label}
+                        </Button>
+                      ))}
+                      <span className="mx-1 text-xs font-mono text-muted-foreground bg-muted rounded px-2 py-1">
+                        {transitDate} {transitTime}
+                      </span>
+                      {TIME_STEPS.slice(4).map((step) => (
+                        <Button
+                          key={step.label}
+                          variant="outline"
+                          size="sm"
+                          data-ocid="transit.secondary_button"
+                          onClick={() => adjustTransitTime(step.delta)}
+                          className="h-7 px-2.5 text-xs font-mono border-green-300 text-green-700 hover:bg-green-50 hover:border-green-400"
+                        >
+                          {step.label}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <Button
+                    data-ocid="transit.primary_button"
+                    onClick={handleTransitCalculate}
+                    disabled={isTransitCalc}
+                    className="text-sm font-semibold"
+                    style={{
+                      background: "oklch(var(--primary))",
+                      color: "oklch(var(--primary-foreground))",
+                    }}
+                  >
+                    {isTransitCalc ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Calculating...
+                      </>
+                    ) : (
+                      <>
+                        <Star className="w-4 h-4 mr-2" />
+                        Calculate Transit
+                      </>
+                    )}
+                  </Button>
                   <p className="text-xs text-muted-foreground">
                     Transit planets will be placed in natal house structure
                     (birth location: {form.place})
@@ -858,6 +1257,35 @@ export default function App() {
                   </motion.div>
                 )}
               </>
+            )}
+          </TabsContent>
+          {/* ====== TAB 4: EVENTS ====== */}
+          <TabsContent value="events" className="space-y-4">
+            {result ? (
+              <EventAnalysis
+                nadiPlanets={calculateNadiNumbers(
+                  result.planets,
+                  result.ascendant.sign,
+                )}
+              />
+            ) : (
+              <div
+                data-ocid="events.empty_state"
+                className="text-center py-16 text-muted-foreground"
+              >
+                <Star className="w-12 h-12 mx-auto mb-4 text-primary/30" />
+                <p className="font-medium">
+                  Calculate a birth chart first to view event analysis
+                </p>
+                <p
+                  className="text-sm mt-1"
+                  style={{
+                    fontFamily: "Noto Sans Devanagari, system-ui, sans-serif",
+                  }}
+                >
+                  पहले जन्म कुंडली की गणना करें
+                </p>
+              </div>
             )}
           </TabsContent>
         </Tabs>
