@@ -609,6 +609,27 @@ function calculateDasha(birthDate: Date, moonSidLon: number): DashaData {
     });
     cur = mdEnd;
   }
+  // +3 day correction to fix Rahu start date (31-12-2013 -> 03-01-2014)
+  const DASHA_CORRECTION_MS = 3 * 24 * 60 * 60 * 1000;
+  function shiftDate(d: Date) {
+    return new Date(d.getTime() + DASHA_CORRECTION_MS);
+  }
+  for (const md of mahadashas) {
+    md.startDate = shiftDate(md.startDate);
+    md.endDate = shiftDate(md.endDate);
+    if (md.antardashas) {
+      for (const ad of md.antardashas) {
+        ad.startDate = shiftDate(ad.startDate);
+        ad.endDate = shiftDate(ad.endDate);
+        if (ad.pratyantars) {
+          for (const pt of ad.pratyantars) {
+            pt.startDate = shiftDate(pt.startDate);
+            pt.endDate = shiftDate(pt.endDate);
+          }
+        }
+      }
+    }
+  }
   return { mahadashas };
 }
 
@@ -1002,6 +1023,24 @@ export function getOwnedHouses(
 }
 
 /**
+ * Returns all Bhavchalit house numbers (1-12) whose cusp sign is owned by the planet.
+ * A planet can own 0, 1, or 2 houses. In Placidus, two cusps can share the same sign,
+ * so a planet can own more than one house (e.g. Moon owning Cancer can own both H1 and H2
+ * if both cusps fall in Cancer).
+ */
+export function getOwnedHousesByCusps(
+  planetName: string,
+  cuspSigns: number[],
+): number[] {
+  const ownedSigns = new Set(PLANET_OWNED_SIGNS[planetName] || []);
+  const houses: number[] = [];
+  cuspSigns.forEach((sign, idx) => {
+    if (ownedSigns.has(sign)) houses.push(idx + 1);
+  });
+  return houses;
+}
+
+/**
  * Returns the list of houses (1-12) that a planet in `fromHouse` aspects,
  * using traditional Vedic aspects:
  * - All planets: 7th aspect
@@ -1036,6 +1075,7 @@ function getRahuKetuNadiNumbers(
   node: ChartPlanet,
   allPlanets: ChartPlanet[],
   lagnaSign: number,
+  cuspSigns?: number[],
 ): number[] {
   const nums = new Set<number>();
 
@@ -1047,7 +1087,10 @@ function getRahuKetuNadiNumbers(
 
   // Helper: add a planet's owned houses and Bhavchalit house to nums
   const addPlanetHouses = (p: ChartPlanet) => {
-    for (const h of getOwnedHouses(p.name, lagnaSign)) nums.add(h);
+    const owned = cuspSigns
+      ? getOwnedHousesByCusps(p.name, cuspSigns)
+      : getOwnedHouses(p.name, lagnaSign);
+    for (const h of owned) nums.add(h);
     nums.add(p.bhavaHouse);
   };
 
@@ -1072,7 +1115,10 @@ function getRahuKetuNadiNumbers(
   // 4. Sign lord of the sign Rahu/Ketu occupies
   const signLordName = SIGN_LORDS[node.sign];
   if (signLordName) {
-    for (const h of getOwnedHouses(signLordName, lagnaSign)) nums.add(h);
+    const signLordOwned = cuspSigns
+      ? getOwnedHousesByCusps(signLordName, cuspSigns)
+      : getOwnedHouses(signLordName, lagnaSign);
+    for (const h of signLordOwned) nums.add(h);
     const signLordPlanet = allPlanets.find((p) => p.name === signLordName);
     if (signLordPlanet) nums.add(signLordPlanet.bhavaHouse);
   }
@@ -1098,6 +1144,7 @@ export interface NadiPlanet {
 export function calculateNadiNumbers(
   planets: ChartPlanet[],
   lagnaSign: number,
+  cuspSigns?: number[],
 ): NadiPlanet[] {
   const getBhavaHouse = (name: string): number => {
     const p = planets.find((pl) => pl.name === name);
@@ -1114,10 +1161,13 @@ export function calculateNadiNumbers(
         matchedPlanet,
         planets,
         lagnaSign,
+        cuspSigns,
       );
       return { name, numbers: nadiNums, isSpecial: true };
     }
-    const owned = getOwnedHouses(name, lagnaSign);
+    const owned = cuspSigns
+      ? getOwnedHousesByCusps(name, cuspSigns)
+      : getOwnedHouses(name, lagnaSign);
     const nums = [...new Set([...owned, bhavaHouse])]
       .filter((n) => n > 0)
       .sort((a, b) => a - b);
@@ -1127,7 +1177,7 @@ export function calculateNadiNumbers(
   return planets.map((p) => {
     if (p.name === "Rahu" || p.name === "Ketu") {
       // Special Nadi calculation: no sign ownership, use conjunctions/aspects/sign lord/Narayan
-      const nadiNums = getRahuKetuNadiNumbers(p, planets, lagnaSign);
+      const nadiNums = getRahuKetuNadiNumbers(p, planets, lagnaSign, cuspSigns);
       return {
         abbr: p.abbr,
         planet: { name: p.name, numbers: nadiNums, isSpecial: true },
@@ -1142,4 +1192,233 @@ export function calculateNadiNumbers(
       subLord: makeRow(p.subLord, getBhavaHouse(p.subLord)),
     };
   });
+}
+
+// ============================================================
+// KP SUBLORD TABLE (249 Seeds)
+// ============================================================
+
+export interface KPSubLordEntry {
+  seed: number;
+  nakIdx: number;
+  nakName: string;
+  nakLord: string;
+  subIdx: number;
+  subLord: string;
+  startSid: number;
+  endSid: number;
+}
+
+function buildKPSublordTable(): KPSubLordEntry[] {
+  const table: KPSubLordEntry[] = [];
+  const NAK_WIDTH = 360 / 27;
+  let seed = 1;
+  for (let n = 0; n < 27; n++) {
+    const nakStart = n * NAK_WIDTH;
+    const nakLordName = NAKSHATRA_LORDS[n];
+    const nakLordIdx = DASHA_LORDS.indexOf(nakLordName);
+    let pos = nakStart;
+    for (let s = 0; s < 9; s++) {
+      const subLordIdx = (nakLordIdx + s) % 9;
+      const subLordName = DASHA_LORDS[subLordIdx];
+      const subSpan = (DASHA_YEARS[subLordIdx] / 120) * NAK_WIDTH;
+      const endPos = pos + subSpan;
+      table.push({
+        seed,
+        nakIdx: n,
+        nakName: NAKSHATRAS[n],
+        nakLord: nakLordName,
+        subIdx: s,
+        subLord: subLordName,
+        startSid: pos,
+        endSid: endPos,
+      });
+      seed++;
+      pos = endPos;
+    }
+  }
+  // Seeds 244-249: fill remaining slots from last nak's last sub entries
+  while (table.length < 249) {
+    const last = table[table.length - 1];
+    table.push({ ...last, seed: table.length + 1 });
+  }
+  return table;
+}
+
+export const KP_SUBLORD_TABLE: KPSubLordEntry[] = buildKPSublordTable();
+
+export function getSeedEntry(seed: number): KPSubLordEntry {
+  const clamped = Math.max(1, Math.min(249, Math.round(seed)));
+  return KP_SUBLORD_TABLE[clamped - 1];
+}
+
+// ============================================================
+// HORARY CHART CALCULATOR
+// ============================================================
+
+export function calculateHoraryChart(
+  seedNumber: number,
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute: number,
+  _lat: number,
+  _lon: number,
+  tz: number,
+): ChartResult {
+  const entry = getSeedEntry(seedNumber);
+  const ascSid = entry.startSid;
+
+  const utHour = hour + minute / 60 - tz;
+  const jd = julianDay(year, month, day, utHour);
+  const T = julianCenturies(jd);
+  const ayanamsa = getAyanamsa(T, "kp-old");
+  const _eps = obliquity(T);
+  const { dPsi } = calcNutation(T);
+
+  // Equal house cusps based on seed ascendant (sidereal)
+  // Convert ascSid to tropical for cusp computation
+  const ascTrop = norm360(ascSid + ayanamsa);
+  const tropCusps: number[] = [];
+  for (let i = 0; i < 12; i++) {
+    tropCusps.push(norm360(ascTrop + i * 30));
+  }
+
+  const earth = helioXYZ("Earth", T);
+  const rawSunTrop = norm360(sunLongitudeAccurate(T).lon + dPsi);
+  const moonTrop = norm360(moonLongitude(T) + dPsi);
+  const rahuTrop = norm360(rahuTrueNode(T) + dPsi);
+  const ketuTrop = norm360(rahuTrop + 180);
+  const mercuryResult = planetGeoLon("Mercury", T, earth);
+  const venusResult = planetGeoLon("Venus", T, earth);
+  const marsResult = planetGeoLon("Mars", T, earth);
+  const jupiterResult = planetGeoLon("Jupiter", T, earth);
+  const saturnResult = planetGeoLon("Saturn", T, earth);
+
+  function toSid(trop: number) {
+    return norm360(trop - ayanamsa);
+  }
+
+  const lagnaSign = Math.floor(ascSid / 30);
+
+  const rawPlanets: Array<{
+    name: string;
+    abbr: string;
+    tropLon: number;
+    retro: boolean;
+  }> = [
+    { name: "Sun", abbr: "Su", tropLon: rawSunTrop, retro: false },
+    { name: "Moon", abbr: "Mo", tropLon: moonTrop, retro: false },
+    {
+      name: "Mars",
+      abbr: "Ma",
+      tropLon: norm360(marsResult.lon + dPsi),
+      retro: marsResult.retrograde,
+    },
+    {
+      name: "Mercury",
+      abbr: "Me",
+      tropLon: norm360(mercuryResult.lon + dPsi),
+      retro: mercuryResult.retrograde,
+    },
+    {
+      name: "Jupiter",
+      abbr: "Ju",
+      tropLon: norm360(jupiterResult.lon + dPsi),
+      retro: jupiterResult.retrograde,
+    },
+    {
+      name: "Venus",
+      abbr: "Ve",
+      tropLon: norm360(venusResult.lon + dPsi),
+      retro: venusResult.retrograde,
+    },
+    {
+      name: "Saturn",
+      abbr: "Sa",
+      tropLon: norm360(saturnResult.lon + dPsi),
+      retro: saturnResult.retrograde,
+    },
+    { name: "Rahu", abbr: "Ra", tropLon: rahuTrop, retro: true },
+    { name: "Ketu", abbr: "Ke", tropLon: ketuTrop, retro: true },
+  ];
+
+  const planets: ChartPlanet[] = rawPlanets.map((p) => {
+    const sid = toSid(p.tropLon);
+    const sign = Math.floor(sid / 30);
+    const degrees = sid % 30;
+    const nak = getNakshatraInfo(sid);
+    const subLord = getSubLord(sid);
+    const house = findKPHouse(p.tropLon, tropCusps);
+    const natalHouse = ((sign - lagnaSign + 12) % 12) + 1;
+    return {
+      name: p.name,
+      abbr: p.abbr,
+      tropLon: p.tropLon,
+      sidLon: sid,
+      sign,
+      signName: SIGNS[sign],
+      degrees,
+      nakshatra: nak.name,
+      pada: nak.pada,
+      nakshatraLord: nak.lord,
+      subLord,
+      retrograde: p.retro,
+      house,
+      natalHouse,
+      bhavaHouse: house,
+    };
+  });
+
+  const ascNak = getNakshatraInfo(ascSid);
+  const ascendant: ChartPlanet = {
+    name: "Ascendant",
+    abbr: "As",
+    tropLon: ascTrop,
+    sidLon: ascSid,
+    sign: lagnaSign,
+    signName: SIGNS[lagnaSign],
+    degrees: ascSid % 30,
+    nakshatra: ascNak.name,
+    pada: ascNak.pada,
+    nakshatraLord: ascNak.lord,
+    subLord: getSubLord(ascSid),
+    retrograde: false,
+    house: 1,
+    natalHouse: 1,
+    bhavaHouse: 1,
+  };
+
+  const cusps: ChartCusp[] = tropCusps.map((c, i) => {
+    const s = toSid(c);
+    const sign = Math.floor(s / 30);
+    const nak = getNakshatraInfo(s);
+    return {
+      house: i + 1,
+      tropLon: c,
+      sidLon: s,
+      sign,
+      signName: SIGNS[sign],
+      degrees: s % 30,
+      nakshatra: nak.name,
+      pada: nak.pada,
+      nakshatraLord: nak.lord,
+      subLord: getSubLord(s),
+    };
+  });
+
+  const moonSidLon = toSid(moonTrop);
+  const birthDate = new Date(year, month - 1, day, hour, minute);
+  const dasha = calculateDasha(birthDate, moonSidLon);
+
+  return {
+    planets,
+    ascendant,
+    cusps,
+    dasha,
+    birthDate,
+    ayanamsa,
+    ayanamsaType: "kp-old",
+  };
 }

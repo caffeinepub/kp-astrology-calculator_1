@@ -30,10 +30,10 @@ function hexWithAlpha(hex: string, alpha: string): string {
 
 function NumberBadges({
   numbers,
-  color,
+  bgColor,
 }: {
   numbers: number[];
-  color: string;
+  bgColor: string;
 }) {
   return (
     <div
@@ -54,11 +54,11 @@ function NumberBadges({
             width: "20px",
             height: "20px",
             borderRadius: "50%",
-            backgroundColor: hexWithAlpha(color, "18"),
-            border: `1px solid ${hexWithAlpha(color, "55")}`,
+            backgroundColor: hexWithAlpha(bgColor, "18"),
+            border: `1px solid ${hexWithAlpha(bgColor, "55")}`,
             fontSize: "10px",
             fontWeight: 700,
-            color: color,
+            color: "#000000",
             lineHeight: 1,
           }}
         >
@@ -101,7 +101,7 @@ function NadiRowDisplay({
         {label}:{" "}
         <span style={{ color: "#555", fontWeight: 700 }}>{row.name}</span>
       </div>
-      <NumberBadges numbers={row.numbers} color={color} />
+      <NumberBadges numbers={row.numbers} bgColor={color} />
     </div>
   );
 }

@@ -16,20 +16,200 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useActor } from "@/hooks/useActor";
+import { useInternetIdentity } from "@/hooks/useInternetIdentity";
 import {
   type AyanamsaType,
   type ChartPlanet,
   type ChartResult,
   SIGN_ABBR,
+  calculateHoraryChart,
   calculateKPChart,
   calculateNadiNumbers,
   calculateTransitPlanets,
   formatDeg,
+  getSeedEntry,
 } from "@/lib/kpEngine";
-import { Download, Loader2, MapPin, RefreshCw, Star } from "lucide-react";
+import {
+  Download,
+  Loader2,
+  LogIn,
+  LogOut,
+  MapPin,
+  RefreshCw,
+  Save,
+  Star,
+} from "lucide-react";
 import { motion } from "motion/react";
 import { useState } from "react";
 import { toast } from "sonner";
+
+// Event color map for chart house number coloring
+const EVENT_CHART_COLORS: Record<string, Record<number, string>> = {
+  normal: {},
+  abortion: {
+    1: "#dc2626",
+    4: "#dc2626",
+    6: "#dc2626",
+    8: "#dc2626",
+    10: "#dc2626",
+    12: "#dc2626",
+    2: "#15803d",
+    5: "#15803d",
+    9: "#15803d",
+    11: "#15803d",
+  },
+  aggression: { 7: "#dc2626", 8: "#dc2626", 12: "#dc2626" },
+  accident: { 4: "#dc2626", 6: "#dc2626", 8: "#dc2626", 12: "#dc2626" },
+  arrest: { 2: "#dc2626", 3: "#dc2626", 8: "#dc2626", 12: "#dc2626" },
+  award: {
+    10: "#15803d",
+    11: "#15803d",
+    6: "#dc2626",
+    8: "#dc2626",
+    12: "#dc2626",
+  },
+  bail: {
+    10: "#15803d",
+    11: "#15803d",
+    6: "#dc2626",
+    8: "#dc2626",
+    12: "#dc2626",
+  },
+  career: {
+    10: "#15803d",
+    11: "#15803d",
+    6: "#dc2626",
+    8: "#dc2626",
+    12: "#dc2626",
+  },
+  change_career: { 5: "#15803d", 9: "#15803d" },
+  childbirth: {
+    2: "#15803d",
+    5: "#15803d",
+    11: "#15803d",
+    1: "#dc2626",
+    4: "#dc2626",
+    10: "#dc2626",
+    6: "#ea580c",
+    8: "#ea580c",
+    12: "#ea580c",
+  },
+  cold_nature: {
+    2: "#15803d",
+    5: "#15803d",
+    9: "#15803d",
+    11: "#15803d",
+    1: "#dc2626",
+    4: "#dc2626",
+    6: "#dc2626",
+    10: "#dc2626",
+  },
+  coming_home: { 2: "#15803d", 4: "#15803d", 11: "#15803d" },
+  depression: { 1: "#dc2626", 2: "#dc2626", 6: "#dc2626", 8: "#dc2626" },
+  divorce: {
+    1: "#dc2626",
+    6: "#dc2626",
+    8: "#dc2626",
+    10: "#dc2626",
+    12: "#dc2626",
+    2: "#15803d",
+    5: "#15803d",
+    7: "#15803d",
+    9: "#15803d",
+    11: "#15803d",
+  },
+  education: {
+    6: "#dc2626",
+    8: "#dc2626",
+    12: "#dc2626",
+    2: "#15803d",
+    4: "#15803d",
+    5: "#15803d",
+    9: "#15803d",
+    11: "#15803d",
+  },
+  health: {
+    5: "#15803d",
+    9: "#15803d",
+    11: "#15803d",
+    6: "#dc2626",
+    8: "#dc2626",
+    12: "#dc2626",
+  },
+  litigation: {
+    6: "#dc2626",
+    8: "#dc2626",
+    12: "#dc2626",
+    10: "#15803d",
+    11: "#15803d",
+  },
+  litigation_win: {
+    6: "#dc2626",
+    8: "#dc2626",
+    12: "#dc2626",
+    10: "#15803d",
+    11: "#15803d",
+  },
+  love: { 5: "#15803d", 8: "#15803d", 12: "#15803d" },
+  marriage: {
+    2: "#15803d",
+    7: "#15803d",
+    11: "#15803d",
+    1: "#dc2626",
+    6: "#dc2626",
+    10: "#dc2626",
+    5: "#2563eb",
+    9: "#2563eb",
+  },
+  property_purchase: {
+    4: "#15803d",
+    11: "#15803d",
+    6: "#ec4899",
+    8: "#ec4899",
+    12: "#ec4899",
+  },
+  property_sale: { 3: "#15803d", 5: "#15803d", 10: "#15803d", 11: "#2563eb" },
+  transfer: { 3: "#15803d", 9: "#15803d", 12: "#15803d" },
+  travel: { 3: "#15803d", 9: "#15803d", 12: "#15803d" },
+  vehicle_purchase: {
+    4: "#15803d",
+    11: "#15803d",
+    6: "#ec4899",
+    8: "#ec4899",
+    12: "#ec4899",
+  },
+  vehicle_sale: { 3: "#15803d", 5: "#15803d", 10: "#15803d" },
+};
+
+const EVENT_OPTIONS = [
+  { id: "normal", label: "Normal / सामान्य" },
+  { id: "abortion", label: "Abortion / गर्भपात" },
+  { id: "aggression", label: "Aggression / आक्रामकता" },
+  { id: "accident", label: "Accident / दुर्घटना" },
+  { id: "arrest", label: "Arrest / गिरफ़्तारी" },
+  { id: "award", label: "Award / पुरस्कार" },
+  { id: "bail", label: "Bail / जमानत" },
+  { id: "career", label: "Career / करियर" },
+  { id: "change_career", label: "Change in Career / करियर बदलाव" },
+  { id: "childbirth", label: "Child Birth / संतान" },
+  { id: "cold_nature", label: "Cold Nature / ठंडा स्वभाव" },
+  { id: "coming_home", label: "Coming Home / घर वापसी" },
+  { id: "depression", label: "Depression / अवसाद" },
+  { id: "divorce", label: "Divorce / तलाक" },
+  { id: "education", label: "Education / शिक्षा" },
+  { id: "health", label: "Health / स्वास्थ्य" },
+  { id: "litigation", label: "Litigation / मुकदमा" },
+  { id: "litigation_win", label: "Litigation Win / मुकदमा जीत" },
+  { id: "love", label: "Love / प्रेम" },
+  { id: "marriage", label: "Marriage / विवाह" },
+  { id: "property_purchase", label: "Property Purchase / संपत्ति खरीद" },
+  { id: "property_sale", label: "Property Sale / संपत्ति बिक्री" },
+  { id: "transfer", label: "Transfer / तबादला" },
+  { id: "travel", label: "Travel / यात्रा" },
+  { id: "vehicle_purchase", label: "Vehicle Purchase / वाहन खरीद" },
+  { id: "vehicle_sale", label: "Vehicle Sale / वाहन बिक्री" },
+];
 
 interface FormState {
   date: string;
@@ -62,6 +242,52 @@ export default function App() {
   const [labelMode, setLabelMode] = useState<"english" | "hindi">("english");
   const [isGeocoding, setIsGeocoding] = useState(false);
   const [isCalculating, setIsCalculating] = useState(false);
+  const [activeEventId, setActiveEventId] = useState("normal");
+
+  // Auth hooks
+  const { login, clear, loginStatus, identity } = useInternetIdentity();
+  const { actor } = useActor();
+
+  const isLoggedIn = loginStatus === "success" && !!identity;
+  const principal = identity?.getPrincipal().toString() ?? "";
+  const shortPrincipal =
+    principal.length > 12
+      ? `${principal.slice(0, 6)}...${principal.slice(-4)}`
+      : principal;
+
+  const handleSaveChart = async () => {
+    if (!result || !actor) return;
+    try {
+      const data = JSON.stringify({
+        date: form.date,
+        time: form.time,
+        place: form.place,
+        lat: form.lat,
+        lon: form.lon,
+        tz: form.tz,
+      });
+      await actor.saveChart(data);
+      toast.success("Chart saved successfully!");
+    } catch (e) {
+      toast.error(`Save failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+
+  const handleLoadChart = async () => {
+    if (!actor) return;
+    try {
+      const data = await actor.loadChart();
+      if (data) {
+        const parsed = JSON.parse(data);
+        setForm((prev) => ({ ...prev, ...parsed }));
+        toast.success("Chart loaded! Click Calculate to view.");
+      } else {
+        toast.error("No saved chart found.");
+      }
+    } catch (e) {
+      toast.error(`Load failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
 
   // Transit state
   const [transitDate, setTransitDate] = useState(todayString);
@@ -70,6 +296,23 @@ export default function App() {
     null,
   );
   const [isTransitCalc, setIsTransitCalc] = useState(false);
+
+  // Horary state
+  const [horaryForm, setHoraryForm] = useState({
+    date: todayString(),
+    time: "12:00",
+    place: "Mumbai, India",
+    lat: "19.0760",
+    lon: "72.8777",
+    tz: "5.5",
+    seed: "15",
+  });
+  const [horaryResult, setHoraryResult] = useState<ChartResult | null>(null);
+  const [horaryLabelMode, setHoraryLabelMode] = useState<"english" | "hindi">(
+    "english",
+  );
+  const [isHoraryCalc, setIsHoraryCalc] = useState(false);
+  const [isHoraryGeocoding, setIsHoraryGeocoding] = useState(false);
 
   const updateForm = (field: keyof FormState, val: string) =>
     setForm((prev) => ({ ...prev, [field]: val }));
@@ -135,6 +378,67 @@ export default function App() {
       setIsCalculating(false);
     }
   };
+
+  const updateHoraryForm = (field: string, val: string) =>
+    setHoraryForm((prev) => ({ ...prev, [field]: val }));
+
+  const handleHoraryGeocode = async () => {
+    if (!horaryForm.place.trim()) return;
+    setIsHoraryGeocoding(true);
+    try {
+      const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(horaryForm.place)}&format=json&limit=1`;
+      const res = await fetch(url, { headers: { "Accept-Language": "en" } });
+      const data = await res.json();
+      if (data && data.length > 0) {
+        updateHoraryForm("lat", Number.parseFloat(data[0].lat).toFixed(4));
+        updateHoraryForm("lon", Number.parseFloat(data[0].lon).toFixed(4));
+        toast.success(
+          `Found: ${data[0].display_name.split(",").slice(0, 3).join(", ")}`,
+        );
+      } else {
+        toast.error("Place not found. Please enter coordinates manually.");
+      }
+    } catch {
+      toast.error("Geocoding failed. Check your internet connection.");
+    } finally {
+      setIsHoraryGeocoding(false);
+    }
+  };
+
+  const handleHoraryCalculate = () => {
+    try {
+      setIsHoraryCalc(true);
+      const [y, m, d] = horaryForm.date.split("-").map(Number);
+      const [hr, min] = horaryForm.time.split(":").map(Number);
+      const lat = Number.parseFloat(horaryForm.lat);
+      const lon = Number.parseFloat(horaryForm.lon);
+      const tz = Number.parseFloat(horaryForm.tz);
+      const seed = Number.parseInt(horaryForm.seed, 10);
+      if (Number.isNaN(lat) || Number.isNaN(lon) || Number.isNaN(tz)) {
+        toast.error("Please enter valid latitude, longitude and UTC offset.");
+        return;
+      }
+      if (Number.isNaN(seed) || seed < 1 || seed > 249) {
+        toast.error("Seed number must be between 1 and 249.");
+        return;
+      }
+      const chart = calculateHoraryChart(seed, y, m, d, hr, min, lat, lon, tz);
+      setHoraryResult(chart);
+      setTimeout(() => {
+        document
+          .getElementById("horary-result")
+          ?.scrollIntoView({ behavior: "smooth" });
+      }, 100);
+    } catch (e) {
+      toast.error(
+        `Horary error: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    } finally {
+      setIsHoraryCalc(false);
+    }
+  };
+
+  const horaryEntry = getSeedEntry(Number.parseInt(horaryForm.seed, 10) || 15);
 
   const handleTransitCalculate = () => {
     if (!result) return;
@@ -322,6 +626,7 @@ export default function App() {
     const nadiNums = calculateNadiNumbers(
       result.planets,
       result.ascendant.sign,
+      result.cusps.map((c) => c.sign),
     );
 
     function classifyNums(nums: number[], rule: (typeof eventRules)[0]) {
@@ -489,39 +794,122 @@ export default function App() {
           <span className="text-xs text-muted-foreground ml-1 hidden sm:block">
             Krishnamurti Paddhati Calculator
           </span>
-          {result && (
-            <button
-              type="button"
-              onClick={handleReset}
-              className="ml-auto text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
-              data-ocid="app.secondary_button"
-            >
-              <RefreshCw className="w-3 h-3" /> New Chart
-            </button>
-          )}
+          <div className="ml-auto flex items-center gap-2">
+            {result && (
+              <button
+                type="button"
+                onClick={handleReset}
+                className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
+                data-ocid="app.secondary_button"
+              >
+                <RefreshCw className="w-3 h-3" /> New Chart
+              </button>
+            )}
+            {/* Auth section */}
+            {!isLoggedIn ? (
+              <Button
+                variant="outline"
+                size="sm"
+                data-ocid="auth.primary_button"
+                onClick={() => login()}
+                disabled={loginStatus === "logging-in"}
+                className="text-xs border-primary/40 hover:bg-primary/10 flex items-center gap-1.5"
+              >
+                {loginStatus === "logging-in" ? (
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                ) : (
+                  <LogIn className="w-3 h-3" />
+                )}
+                <span className="hidden sm:inline">Login to Save</span>
+              </Button>
+            ) : (
+              <div className="flex items-center gap-1.5">
+                <span
+                  className="text-xs text-muted-foreground hidden sm:inline"
+                  title={principal}
+                >
+                  {shortPrincipal}
+                </span>
+                {result && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    data-ocid="save.button"
+                    onClick={handleSaveChart}
+                    className="text-xs border-emerald-400/60 hover:bg-emerald-50 text-emerald-700 flex items-center gap-1"
+                  >
+                    <Save className="w-3 h-3" />
+                    <span className="hidden sm:inline">Save</span>
+                  </Button>
+                )}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  data-ocid="load.button"
+                  onClick={handleLoadChart}
+                  className="text-xs border-blue-400/60 hover:bg-blue-50 text-blue-700 flex items-center gap-1"
+                >
+                  <Download className="w-3 h-3" />
+                  <span className="hidden sm:inline">Load</span>
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  data-ocid="logout.button"
+                  onClick={() => clear()}
+                  className="text-xs text-muted-foreground hover:text-foreground"
+                >
+                  <LogOut className="w-3 h-3" />
+                </Button>
+              </div>
+            )}
+          </div>
         </div>
       </header>
 
       <main className="flex-1 max-w-7xl mx-auto w-full px-4 py-6">
         <Tabs defaultValue="horoscope" className="space-y-4">
-          <TabsList className="grid grid-cols-4 w-full max-w-xl">
-            <TabsTrigger data-ocid="horoscope.tab" value="horoscope">
+          <TabsList className="flex w-full overflow-x-auto">
+            <TabsTrigger
+              data-ocid="horoscope.tab"
+              value="horoscope"
+              className="shrink-0 whitespace-nowrap"
+            >
               Horoscope
             </TabsTrigger>
-            <TabsTrigger data-ocid="planets.tab" value="planets">
+            <TabsTrigger
+              data-ocid="planets.tab"
+              value="planets"
+              className="shrink-0 whitespace-nowrap"
+            >
               Planets &amp; Houses
             </TabsTrigger>
-            <TabsTrigger data-ocid="transit.tab" value="transit">
+            <TabsTrigger
+              data-ocid="transit.tab"
+              value="transit"
+              className="shrink-0 whitespace-nowrap"
+            >
               Transit
             </TabsTrigger>
             <TabsTrigger
               data-ocid="events.tab"
               value="events"
+              className="shrink-0 whitespace-nowrap"
               style={{
                 fontFamily: "Noto Sans Devanagari, system-ui, sans-serif",
               }}
             >
               घटनाएं / Events
+            </TabsTrigger>
+            <TabsTrigger
+              data-ocid="horary.tab"
+              value="horary"
+              className="shrink-0 whitespace-nowrap"
+              style={{
+                fontFamily: "Noto Sans Devanagari, system-ui, sans-serif",
+              }}
+            >
+              Horary / प्रश्न
             </TabsTrigger>
           </TabsList>
 
@@ -851,6 +1239,7 @@ export default function App() {
                       cusps={result.cusps}
                       labelMode={labelMode}
                       mode="natal"
+                      eventHouseColors={EVENT_CHART_COLORS[activeEventId] ?? {}}
                     />
                   </div>
 
@@ -873,8 +1262,51 @@ export default function App() {
                       cusps={result.cusps}
                       labelMode={labelMode}
                       mode="bhavchalit"
+                      eventHouseColors={EVENT_CHART_COLORS[activeEventId] ?? {}}
                     />
                   </div>
+                </div>
+
+                {/* Event Selector */}
+                <div className="rounded-xl border border-primary/30 bg-card px-4 py-3 flex items-center gap-3">
+                  <span
+                    className="text-xs font-semibold text-foreground whitespace-nowrap"
+                    style={{
+                      fontFamily: "Noto Sans Devanagari, system-ui, sans-serif",
+                    }}
+                  >
+                    Event / घटना चुनें
+                  </span>
+                  <select
+                    data-ocid="event.select"
+                    value={activeEventId}
+                    onChange={(e) => setActiveEventId(e.target.value)}
+                    className="flex-1 text-xs border border-border rounded-md px-3 py-1.5 bg-background focus:outline-none focus:ring-2 focus:ring-primary/50"
+                    style={{
+                      fontFamily: "Noto Sans Devanagari, system-ui, sans-serif",
+                      maxWidth: "320px",
+                    }}
+                  >
+                    {EVENT_OPTIONS.map((opt) => (
+                      <option key={opt.id} value={opt.id}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                  {activeEventId !== "normal" && (
+                    <span className="text-xs text-muted-foreground">
+                      {Object.entries(
+                        EVENT_CHART_COLORS[activeEventId] ?? {},
+                      ).map(([h, c]) => (
+                        <span
+                          key={h}
+                          style={{ color: c, fontWeight: 700, marginRight: 4 }}
+                        >
+                          H{h}
+                        </span>
+                      ))}
+                    </span>
+                  )}
                 </div>
 
                 {/* Dasha (full width) */}
@@ -897,6 +1329,7 @@ export default function App() {
                     nadiPlanets={calculateNadiNumbers(
                       result.planets,
                       result.ascendant.sign,
+                      result.cusps.map((c) => c.sign),
                     )}
                   />
                 </div>
@@ -1266,7 +1699,9 @@ export default function App() {
                 nadiPlanets={calculateNadiNumbers(
                   result.planets,
                   result.ascendant.sign,
+                  result.cusps.map((c) => c.sign),
                 )}
+                activeEventColors={EVENT_CHART_COLORS[activeEventId]}
               />
             ) : (
               <div
@@ -1286,6 +1721,430 @@ export default function App() {
                   पहले जन्म कुंडली की गणना करें
                 </p>
               </div>
+            )}
+          </TabsContent>
+
+          {/* ====== TAB 5: HORARY ====== */}
+          <TabsContent value="horary" className="space-y-6">
+            {/* Horary Form */}
+            <motion.section
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.4 }}
+            >
+              <div className="rounded-xl border shadow-gold bg-card p-5 space-y-4">
+                <h2 className="font-semibold text-base text-foreground flex items-center gap-2">
+                  <Star className="w-4 h-4 text-primary" />
+                  Horary Query Details / प्रश्न विवरण
+                </h2>
+                <p className="text-xs text-muted-foreground">
+                  Enter the date &amp; time of the question, your location, and
+                  the seed number (1–249) to cast a Horary chart.
+                </p>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <div className="space-y-1">
+                    <Label
+                      htmlFor="h-dob"
+                      className="text-xs text-muted-foreground"
+                    >
+                      Date of Query
+                    </Label>
+                    <Input
+                      id="h-dob"
+                      data-ocid="horary.input"
+                      type="date"
+                      value={horaryForm.date}
+                      onChange={(e) => updateHoraryForm("date", e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label
+                      htmlFor="h-time"
+                      className="text-xs text-muted-foreground"
+                    >
+                      Time of Query
+                    </Label>
+                    <Input
+                      id="h-time"
+                      data-ocid="horary.input"
+                      type="time"
+                      value={horaryForm.time}
+                      onChange={(e) => updateHoraryForm("time", e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label
+                      htmlFor="h-tz"
+                      className="text-xs text-muted-foreground"
+                    >
+                      UTC Offset (hrs)
+                    </Label>
+                    <Input
+                      id="h-tz"
+                      data-ocid="horary.input"
+                      type="number"
+                      step="0.5"
+                      value={horaryForm.tz}
+                      onChange={(e) => updateHoraryForm("tz", e.target.value)}
+                      placeholder="5.5 for IST"
+                    />
+                  </div>
+                  <div className="space-y-1 sm:col-span-2 lg:col-span-1">
+                    <Label
+                      htmlFor="h-place"
+                      className="text-xs text-muted-foreground"
+                    >
+                      Place
+                    </Label>
+                    <div className="flex gap-2">
+                      <Input
+                        id="h-place"
+                        data-ocid="horary.input"
+                        value={horaryForm.place}
+                        onChange={(e) =>
+                          updateHoraryForm("place", e.target.value)
+                        }
+                        placeholder="City, Country"
+                        onKeyDown={(e) =>
+                          e.key === "Enter" && handleHoraryGeocode()
+                        }
+                      />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        data-ocid="horary_geocode.button"
+                        onClick={handleHoraryGeocode}
+                        disabled={isHoraryGeocoding}
+                        className="shrink-0 border-primary/40 hover:bg-primary/10"
+                      >
+                        {isHoraryGeocoding ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <MapPin className="w-4 h-4" />
+                        )}
+                        <span className="ml-1 hidden sm:inline">Look Up</span>
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <Label
+                      htmlFor="h-lat"
+                      className="text-xs text-muted-foreground"
+                    >
+                      Latitude
+                    </Label>
+                    <Input
+                      id="h-lat"
+                      data-ocid="horary.input"
+                      type="number"
+                      step="0.0001"
+                      value={horaryForm.lat}
+                      onChange={(e) => updateHoraryForm("lat", e.target.value)}
+                      placeholder="19.0760"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label
+                      htmlFor="h-lon"
+                      className="text-xs text-muted-foreground"
+                    >
+                      Longitude
+                    </Label>
+                    <Input
+                      id="h-lon"
+                      data-ocid="horary.input"
+                      type="number"
+                      step="0.0001"
+                      value={horaryForm.lon}
+                      onChange={(e) => updateHoraryForm("lon", e.target.value)}
+                      placeholder="72.8777"
+                    />
+                  </div>
+                </div>
+
+                {/* Seed Number */}
+                <div className="rounded-lg border border-primary/20 bg-primary/5 p-4 space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                    <div className="space-y-1 flex-1 max-w-xs">
+                      <Label
+                        htmlFor="h-seed"
+                        className="text-xs font-semibold text-primary"
+                      >
+                        Seed Number (प्रश्न संख्या) — 1 to 249
+                      </Label>
+                      <Input
+                        id="h-seed"
+                        data-ocid="horary_seed.input"
+                        type="number"
+                        min="1"
+                        max="249"
+                        value={horaryForm.seed}
+                        onChange={(e) =>
+                          updateHoraryForm("seed", e.target.value)
+                        }
+                        className="text-lg font-bold border-primary/40 focus:border-primary"
+                      />
+                    </div>
+                  </div>
+                  {/* Live seed preview */}
+                  {horaryForm.seed &&
+                    Number.parseInt(horaryForm.seed, 10) >= 1 &&
+                    Number.parseInt(horaryForm.seed, 10) <= 249 && (
+                      <div className="text-sm font-medium text-foreground bg-card rounded-md px-3 py-2 border border-border">
+                        <span className="text-primary font-bold">
+                          Seed {horaryForm.seed}
+                        </span>
+                        {" → "}
+                        <span>
+                          {horaryEntry.nakName}{" "}
+                          {Math.floor(horaryEntry.startSid % 30)}°
+                          {Math.floor((horaryEntry.startSid % 1) * 60)}&#39;
+                          {Math.round(
+                            (((horaryEntry.startSid % 1) * 60) % 1) * 60,
+                          )}
+                          &#34;
+                        </span>
+                        {" | "}
+                        <span className="text-muted-foreground">
+                          Nak Lord: <strong>{horaryEntry.nakLord}</strong>
+                        </span>
+                        {" | "}
+                        <span className="text-muted-foreground">
+                          Sub Lord: <strong>{horaryEntry.subLord}</strong>
+                        </span>
+                      </div>
+                    )}
+                </div>
+
+                <Button
+                  data-ocid="horary_calculate.primary_button"
+                  onClick={handleHoraryCalculate}
+                  disabled={isHoraryCalc}
+                  className="w-full sm:w-auto text-sm font-semibold"
+                  style={{
+                    background: "oklch(var(--primary))",
+                    color: "oklch(var(--primary-foreground))",
+                  }}
+                >
+                  {isHoraryCalc ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Calculating...
+                    </>
+                  ) : (
+                    <>
+                      <Star className="w-4 h-4 mr-2" />
+                      Calculate Horary Chart
+                    </>
+                  )}
+                </Button>
+              </div>
+            </motion.section>
+
+            {/* Horary Results */}
+            {horaryResult ? (
+              <motion.section
+                id="horary-result"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.5 }}
+                className="space-y-5"
+              >
+                {/* Details card */}
+                <div className="rounded-xl border border-border bg-card px-4 py-3 space-y-2">
+                  <div className="flex flex-wrap items-start gap-x-6 gap-y-1.5">
+                    <div className="flex items-center gap-1.5">
+                      <Star className="w-3.5 h-3.5 text-primary shrink-0" />
+                      <span className="text-xs text-muted-foreground">
+                        Date:
+                      </span>
+                      <span className="text-xs font-semibold">
+                        {horaryForm.date}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs text-muted-foreground">
+                        Time:
+                      </span>
+                      <span className="text-xs font-semibold">
+                        {horaryForm.time}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs text-muted-foreground">
+                        Place:
+                      </span>
+                      <span className="text-xs font-semibold">
+                        {horaryForm.place}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs text-muted-foreground">
+                        Lat/Lon:
+                      </span>
+                      <span className="text-xs font-semibold">
+                        {horaryForm.lat}, {horaryForm.lon}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs text-muted-foreground">
+                        Seed:
+                      </span>
+                      <span className="text-xs font-bold text-primary">
+                        {horaryForm.seed}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs text-muted-foreground">
+                        Asc:
+                      </span>
+                      <span className="text-xs font-semibold">
+                        {horaryResult.ascendant.signName}{" "}
+                        {formatDeg(horaryResult.ascendant.degrees)}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs text-muted-foreground">
+                        Nak Lord:
+                      </span>
+                      <span className="text-xs font-semibold">
+                        {horaryResult.ascendant.nakshatraLord}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs text-muted-foreground">
+                        Sub Lord:
+                      </span>
+                      <span className="text-xs font-semibold">
+                        {horaryResult.ascendant.subLord}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Two charts side by side */}
+                <div className="flex flex-col lg:flex-row gap-5">
+                  <div className="lg:w-1/2 rounded-xl border border-border bg-card p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="font-semibold text-sm text-foreground">
+                        Horary Chart (Rashi)
+                      </h3>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          data-ocid="horary_label.toggle"
+                          onClick={() => setHoraryLabelMode("english")}
+                          className={`px-2.5 py-1 text-xs font-semibold rounded-l-md border transition-colors ${
+                            horaryLabelMode === "english"
+                              ? "bg-primary text-primary-foreground border-primary"
+                              : "bg-card text-muted-foreground border-border hover:bg-accent"
+                          }`}
+                        >
+                          EN
+                        </button>
+                        <button
+                          type="button"
+                          data-ocid="horary_label.toggle"
+                          onClick={() => setHoraryLabelMode("hindi")}
+                          className={`px-2.5 py-1 text-xs font-semibold rounded-r-md border-t border-r border-b transition-colors ${
+                            horaryLabelMode === "hindi"
+                              ? "bg-primary text-primary-foreground border-primary"
+                              : "bg-card text-muted-foreground border-border hover:bg-accent"
+                          }`}
+                          style={{
+                            fontFamily: "Noto Sans Devanagari, sans-serif",
+                          }}
+                        >
+                          हि
+                        </button>
+                      </div>
+                    </div>
+                    <NorthIndianChart
+                      planets={horaryResult.planets}
+                      ascendant={horaryResult.ascendant}
+                      cusps={horaryResult.cusps}
+                      labelMode={horaryLabelMode}
+                      mode="natal"
+                    />
+                  </div>
+                  <div className="lg:w-1/2 rounded-xl border border-blue-200 bg-card p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <h3
+                        className="font-semibold text-sm"
+                        style={{ color: "#0066aa" }}
+                      >
+                        Bhavchalit Chart
+                      </h3>
+                      <span className="text-xs text-muted-foreground">
+                        Shifted positions
+                      </span>
+                    </div>
+                    <NorthIndianChart
+                      planets={horaryResult.planets}
+                      ascendant={horaryResult.ascendant}
+                      cusps={horaryResult.cusps}
+                      labelMode={horaryLabelMode}
+                      mode="bhavchalit"
+                    />
+                  </div>
+                </div>
+
+                {/* Dasa */}
+                <div className="w-full">
+                  <DashaSection dasha={horaryResult.dasha} />
+                </div>
+
+                {/* Nadi Planet Numbers */}
+                <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Star className="w-4 h-4 text-primary" />
+                    <h3 className="font-semibold text-sm text-foreground">
+                      Nadi Planet Numbers
+                    </h3>
+                    <span className="text-xs text-muted-foreground">
+                      (Planet · Nak Lord · Sub Lord significance)
+                    </span>
+                  </div>
+                  <NadiNumbers
+                    nadiPlanets={calculateNadiNumbers(
+                      horaryResult.planets,
+                      horaryResult.ascendant.sign,
+                      horaryResult.cusps.map((c) => c.sign),
+                    )}
+                  />
+                </div>
+
+                {/* Events */}
+                <EventAnalysis
+                  nadiPlanets={calculateNadiNumbers(
+                    horaryResult.planets,
+                    horaryResult.ascendant.sign,
+                    horaryResult.cusps.map((c) => c.sign),
+                  )}
+                />
+              </motion.section>
+            ) : (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ delay: 0.3 }}
+                data-ocid="horary.empty_state"
+                className="text-center py-16 text-muted-foreground"
+              >
+                <Star className="w-12 h-12 mx-auto mb-4 text-primary/30" />
+                <p className="font-medium">
+                  Enter query details and seed number above
+                </p>
+                <p
+                  className="text-sm mt-1"
+                  style={{
+                    fontFamily: "Noto Sans Devanagari, system-ui, sans-serif",
+                  }}
+                >
+                  बीज संख्या और प्रश्न समय भरें
+                </p>
+              </motion.div>
             )}
           </TabsContent>
         </Tabs>

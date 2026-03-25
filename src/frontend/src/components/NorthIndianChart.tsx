@@ -1,4 +1,4 @@
-import { type ChartCusp, type ChartPlanet, SIGN_ABBR } from "@/lib/kpEngine";
+import type { ChartCusp, ChartPlanet } from "@/lib/kpEngine";
 
 const PLANET_COLORS: Record<string, string> = {
   Su: "#cc0000",
@@ -32,63 +32,75 @@ const HINDI_ABBR: Record<string, string> = {
   As: "ल",
 };
 
+const RETRO_MARKER: Record<string, string> = {
+  Ra: "*",
+  Ke: "*",
+};
+
 interface Props {
   planets: ChartPlanet[];
   ascendant: ChartPlanet;
-  cusps: ChartCusp[];
+  cusps?: ChartCusp[];
   labelMode?: "english" | "hindi";
   mode?: "natal" | "bhavchalit";
   title?: string;
+  eventHouseColors?: Record<number, string>;
 }
 
-// SVG chart dimensions
-const S = 360; // Total size
-const C = S / 2; // Center = 180
-const OFF = 90; // Offset for inner diamond from midpoints
-
-// Key points
-// Outer corners
-const TL: [number, number] = [0, 0];
-const TR: [number, number] = [S, 0];
-const BR: [number, number] = [S, S];
-const BL: [number, number] = [0, S];
-// Inner diamond corners
-const DT: [number, number] = [C, OFF]; // top inner = (180,90)
-const DR: [number, number] = [S - OFF, C]; // right inner = (270,180)
-const DB: [number, number] = [C, S - OFF]; // bottom inner = (180,270)
-const DL: [number, number] = [OFF, C]; // left inner = (90,180)
-const CC: [number, number] = [C, C]; // center = (180,180)
+const S = 500;
+const C = S / 2; // 250
 
 type Pt = [number, number];
 
+// Outer corners
+const TL: Pt = [0, 0];
+const TR: Pt = [S, 0];
+const BR: Pt = [S, S];
+const BL: Pt = [0, S];
+
+// Inner diamond vertices — corners touch MIDPOINTS of outer square sides
+const DT: Pt = [C, 0]; // top midpoint
+const DR: Pt = [S, C]; // right midpoint
+const DB: Pt = [C, S]; // bottom midpoint
+const DL: Pt = [0, C]; // left midpoint
+
+// Intersection points: where the two full diagonals (X) cross the inner diamond edges
+const I1: Pt = [C / 2, C / 2]; // [125,125]
+const I2: Pt = [C + C / 2, C / 2]; // [375,125]
+const I3: Pt = [C + C / 2, C + C / 2]; // [375,375]
+const I4: Pt = [C / 2, C + C / 2]; // [125,375]
+const CC: Pt = [C, C]; // [250,250] center
+
+// 12 house polygons — anti-clockwise from top (H1 at top)
 const HOUSE_POLYS: Record<number, Pt[]> = {
-  1: [TL, TR, DT],
-  2: [TL, DT, DL],
-  3: [DL, DT, CC],
-  4: [TL, BL, DL],
-  5: [DL, CC, DB],
-  6: [BL, DL, DB],
-  7: [BL, BR, DB],
-  8: [BR, DR, DB],
-  9: [DR, CC, DB],
-  10: [TR, BR, DR],
-  11: [DT, DR, CC],
-  12: [TR, DT, DR],
+  1: [DT, I2, CC, I1], // top inner rhombus
+  2: [TL, DT, I1], // top-left outer triangle (near top)
+  3: [TL, I1, DL], // top-left outer triangle (near left)
+  4: [DL, I1, CC, I4], // left inner rhombus
+  5: [BL, DL, I4], // bottom-left outer triangle (near left)
+  6: [BL, I4, DB], // bottom-left outer triangle (near bottom)
+  7: [DB, I4, CC, I3], // bottom inner rhombus
+  8: [BR, DB, I3], // bottom-right outer triangle (near bottom)
+  9: [BR, I3, DR], // bottom-right outer triangle (near right)
+  10: [DR, I2, CC, I3], // right inner rhombus
+  11: [TR, DR, I2], // top-right outer triangle (near right)
+  12: [TR, I2, DT], // top-right outer triangle (near top)
 };
 
+// Centroids for label placement
 const HOUSE_CENTROIDS: Record<number, Pt> = {
-  1: [180, 40],
-  2: [82, 82],
-  3: [145, 147],
-  4: [34, 180],
-  5: [145, 213],
-  6: [82, 278],
-  7: [180, 320],
-  8: [278, 278],
-  9: [215, 213],
-  10: [326, 180],
-  11: [215, 147],
-  12: [278, 82],
+  1: [250, 120], // top inner rhombus
+  2: [108, 52], // top-left upper triangle
+  3: [48, 112], // top-left lower triangle
+  4: [122, 250], // left inner rhombus
+  5: [48, 388], // bottom-left lower triangle
+  6: [108, 448], // bottom-left upper triangle
+  7: [250, 380], // bottom inner rhombus
+  8: [392, 448], // bottom-right lower triangle
+  9: [452, 388], // bottom-right upper triangle
+  10: [378, 250], // right inner rhombus
+  11: [452, 112], // top-right upper triangle
+  12: [392, 52], // top-right lower triangle
 };
 
 function polyStr(pts: Pt[]): string {
@@ -98,14 +110,14 @@ function polyStr(pts: Pt[]): string {
 export default function NorthIndianChart({
   planets,
   ascendant,
-  cusps,
+  cusps: _cusps,
   labelMode = "english",
   mode = "natal",
   title,
+  eventHouseColors = {},
 }: Props) {
   const lagnaSign = ascendant.sign;
-  const borderColor = mode === "bhavchalit" ? "#0066aa" : "#c17d00";
-  const lagnaFill = mode === "bhavchalit" ? "#ddeeff" : "#fffbe6";
+  const borderColor = mode === "bhavchalit" ? "#0066aa" : "#22a855";
   const isHindi = labelMode === "hindi";
 
   const getPlanetsInHouse = (houseNum: number): ChartPlanet[] => {
@@ -117,17 +129,15 @@ export default function NorthIndianChart({
     return all.filter((p) => p.sign === sign);
   };
 
-  const getSignForHouse = (houseNum: number): number => {
-    if (mode === "bhavchalit") {
-      return cusps[houseNum - 1]?.sign ?? 0;
-    }
-    return (lagnaSign + houseNum - 1) % 12;
-  };
-
   const getLabel = (abbr: string) =>
     isHindi ? HINDI_ABBR[abbr] || abbr : abbr;
 
   const HOUSES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+
+  // Corner houses (small triangles): H2, H3, H5, H6, H8, H9, H11, H12
+  // Inner rhombus houses (bigger): H1, H4, H7, H10
+  const isCorner = (h: number) => [2, 3, 5, 6, 8, 9, 11, 12].includes(h);
+  const isInner = (h: number) => [1, 4, 7, 10].includes(h);
 
   return (
     <div>
@@ -135,7 +145,7 @@ export default function NorthIndianChart({
         <div
           style={{
             textAlign: "center",
-            fontSize: "11px",
+            fontSize: "12px",
             fontWeight: 700,
             color: borderColor,
             marginBottom: "4px",
@@ -145,13 +155,7 @@ export default function NorthIndianChart({
           {title}
         </div>
       )}
-      <div
-        style={{
-          width: "100%",
-          maxWidth: "420px",
-          margin: "0 auto",
-        }}
-      >
+      <div style={{ width: "100%", maxWidth: "520px", margin: "0 auto" }}>
         <svg
           viewBox={`0 0 ${S} ${S}`}
           style={{
@@ -167,108 +171,158 @@ export default function NorthIndianChart({
               : "North Indian KP Astrology Chart"
           }
         >
-          {/* Background */}
-          <rect
-            x="0"
-            y="0"
-            width={S}
-            height={S}
-            fill="white"
-            stroke={borderColor}
-            strokeWidth="2"
-          />
+          {/* White background */}
+          <rect x="0" y="0" width={S} height={S} fill="white" />
 
           {/* House polygon fills */}
           {HOUSES.map((h) => (
             <polygon
               key={h}
               points={polyStr(HOUSE_POLYS[h])}
-              fill={h === 1 ? lagnaFill : "white"}
-              stroke={borderColor}
-              strokeWidth="1"
+              fill="white"
+              stroke="none"
             />
           ))}
 
-          {/* House labels and planets */}
+          {/* === STRUCTURE: outer square + full X diagonals + inner diamond === */}
+          {/* 1. Outer border */}
+          <rect
+            x="0"
+            y="0"
+            width={S}
+            height={S}
+            fill="none"
+            stroke={borderColor}
+            strokeWidth="3"
+          />
+          {/* 2. Full diagonal X — corner to corner */}
+          <line
+            x1={TL[0]}
+            y1={TL[1]}
+            x2={BR[0]}
+            y2={BR[1]}
+            stroke={borderColor}
+            strokeWidth="2"
+          />
+          <line
+            x1={TR[0]}
+            y1={TR[1]}
+            x2={BL[0]}
+            y2={BL[1]}
+            stroke={borderColor}
+            strokeWidth="2"
+          />
+          {/* 3. Inner diamond — corners at midpoints of outer square sides */}
+          <polygon
+            points={polyStr([DT, DR, DB, DL])}
+            fill="none"
+            stroke={borderColor}
+            strokeWidth="2"
+          />
+
+          {/* House content */}
           {HOUSES.map((h) => {
             const [cx, cy] = HOUSE_CENTROIDS[h];
             const planetsHere = getPlanetsInHouse(h);
-            const signAbbr = SIGN_ABBR[getSignForHouse(h)];
             const isLagna = h === 1;
-            const hasManyPlanets = planetsHere.length >= 4;
 
-            type Line = {
-              text: string;
-              color: string;
-              size: number;
-              bold: boolean;
-            };
-            const lines: Line[] = [];
+            const maxCols = isInner(h) ? 3 : isCorner(h) ? 2 : 2;
+            const cols = Math.min(maxCols, planetsHere.length || 1);
+            const spacingX = isCorner(h) ? 24 : 28;
+            const spacingY = isCorner(h) ? 18 : 20;
 
-            // House number (small, light)
-            lines.push({
-              text: String(h),
-              color: "#bbb",
-              size: 7,
-              bold: false,
-            });
-
-            // Sign abbreviation
-            lines.push({
-              text: signAbbr,
-              color: borderColor,
-              size: 7,
-              bold: true,
-            });
-
-            // ASC label for H1
-            if (isLagna) {
-              lines.push({
-                text: "ASC",
-                color: borderColor,
-                size: 7,
-                bold: true,
-              });
+            const rows: ChartPlanet[][] = [];
+            for (let i = 0; i < planetsHere.length; i += cols) {
+              rows.push(planetsHere.slice(i, i + cols));
             }
 
-            // Planets — compact format: `Su22°` (no space before degree)
-            for (const p of planetsHere) {
-              const deg = Math.floor(p.degrees);
-              const retroStr = p.retrograde ? "R" : "";
-              const col = PLANET_COLORS[p.abbr] || "#333";
-              lines.push({
-                text: `${getLabel(p.abbr)}${deg}°${retroStr}`,
-                color: col,
-                size: isHindi ? 8 : 7.5,
-                bold: true,
-              });
-            }
+            const totalPlanetH = rows.length * spacingY;
+            const hdrH = isLagna ? 28 : 18;
+            const blockH = hdrH + (planetsHere.length > 0 ? totalPlanetH : 0);
+            const startY = cy - blockH / 2;
 
-            // Use smaller line height for crowded houses
-            const lineH = hasManyPlanets ? 8 : 9;
-            const totalH = lines.length * lineH;
-            const startY = cy - totalH / 2 + lineH * 0.65;
+            // House number color: use event color if provided, else default gray
+            const houseNumColor = eventHouseColors[h] ?? "#c0c0c0";
 
             return (
               <g key={h}>
-                {lines.map((line, i) => (
+                {/* House number */}
+                <text
+                  x={cx}
+                  y={startY + 14}
+                  textAnchor="middle"
+                  fill={houseNumColor}
+                  fontSize={isCorner(h) ? 16 : 20}
+                  fontWeight={eventHouseColors[h] ? "bold" : "normal"}
+                  fontFamily="system-ui, sans-serif"
+                >
+                  {h}
+                </text>
+
+                {isLagna && (
                   <text
-                    key={`h${h}-${i}-${line.text}`}
                     x={cx}
-                    y={startY + i * lineH}
+                    y={startY + 26}
                     textAnchor="middle"
-                    fill={line.color}
-                    fontSize={line.size}
-                    fontWeight={line.bold ? "bold" : "normal"}
-                    fontFamily={
-                      isHindi
-                        ? "Noto Sans Devanagari, system-ui, sans-serif"
-                        : "system-ui, sans-serif"
-                    }
+                    fill={borderColor}
+                    fontSize={9}
+                    fontWeight="bold"
+                    fontFamily="system-ui, sans-serif"
                   >
-                    {line.text}
+                    ASC
                   </text>
-                ))}
+                )}
+
+                {rows.map((row, rowIdx) => {
+                  const rowY = startY + hdrH + rowIdx * spacingY + 12;
+                  const rowWidth = (row.length - 1) * spacingX;
+                  return row.map((p, colIdx) => {
+                    const px = cx - rowWidth / 2 + colIdx * spacingX;
+                    const deg = Math.floor(p.degrees);
+                    const col = PLANET_COLORS[p.abbr] || "#333";
+                    const lbl = getLabel(p.abbr);
+                    const isHindiLbl = isHindi && HINDI_ABBR[p.abbr];
+                    const fontSize = isHindiLbl ? 13 : 12;
+
+                    let marker = "";
+                    if (p.retrograde) marker += "R";
+                    else if (RETRO_MARKER[p.abbr])
+                      marker += RETRO_MARKER[p.abbr];
+
+                    return (
+                      <g key={`h${h}-p-${p.abbr}`}>
+                        <text
+                          x={px + fontSize * 0.4}
+                          y={rowY - 6}
+                          textAnchor="start"
+                          fill={col}
+                          fontSize={7}
+                          fontWeight="normal"
+                          fontFamily="system-ui, sans-serif"
+                          opacity={0.9}
+                        >
+                          {deg}
+                          {marker}
+                        </text>
+                        <text
+                          x={px}
+                          y={rowY}
+                          textAnchor="middle"
+                          fill={col}
+                          fontSize={fontSize}
+                          fontWeight="bold"
+                          fontFamily={
+                            isHindi
+                              ? "Noto Sans Devanagari, system-ui, sans-serif"
+                              : "system-ui, sans-serif"
+                          }
+                        >
+                          {lbl}
+                        </text>
+                      </g>
+                    );
+                  });
+                })}
               </g>
             );
           })}

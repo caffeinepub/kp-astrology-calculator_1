@@ -1,60 +1,64 @@
 # KP Astrology Calculator
 
 ## Current State
-- Single-page React app with a birth details form at top
-- Below the form: Natal + Bhavchalit North Indian charts side by side
-- Below charts: Dasha panel + Nadi Planet Numbers
-- At bottom: 2-tab section for Planet Details table and House Cusps table
-- NorthIndianChart uses a 5-row x 3-col grid; house sequence goes CLOCKWISE (H12 top-left → H1 top-center → H2 top-right → H3 right ... H11 left)
-- kpEngine.ts has a `SUN_KP_OLD_CORRECTION = -2.0` empirical correction; Sun's nakshatra/sublord is computed AFTER this correction, placing it in Venus sublord zone
-- No transit functionality exists
+A KP astrology app with North Indian charts, Bhavchalit, Dasa panel, Nadi Numbers, Transit, Events (8 tables), and Horary tabs. Authorization component is now selected. Planet numbers in Nadi panel have various colors. Dasa shows Rahu starting 31-12-2013 (3 days early vs reference). No event dropdown on Horoscope tab. No user account save/load feature.
 
 ## Requested Changes (Diff)
 
 ### Add
-- **3-tab page layout**: Replace the current single-scrolling-page with 3 top-level tabs:
-  - Tab 1 "Horoscope": Form at top, then Natal + Bhavchalit charts side by side, then Dasa panel, then Nadi Planet Numbers
-  - Tab 2 "Planets & Houses": Planet details table + House cusp degrees table (move existing bottom tabs here)
-  - Tab 3 "Transit": Transit area with date picker and chart display
-- **Transit tab (Tab 3)**:
-  - Date input field (default = today's date)
-  - Optional time input (default = 12:00)
-  - "Calculate Transit" button
-  - Shows two North Indian charts side by side: LEFT = Natal chart (from birth data, read-only, shows natal planets), RIGHT = Transit chart (shows transit planets for selected date placed by zodiac sign; the 12 houses/signs are arranged per the NATAL lagna to show direct house-to-house comparison)
-  - Transit planets computed using same ayanamsa as selected for birth chart
-  - When no birth chart is calculated yet, show a message prompting the user to calculate the birth chart first
-  - `calculateTransitPlanetPositions(year, month, day, hour, min, lat, lon, tz, ayanamsa)` added to kpEngine.ts — same planet calculation logic as the birth chart but for the transit date; returns `ChartPlanet[]` array (no cusps needed unless birth location is used)
-  - Transit chart header shows the selected transit date
-- **Rahu/Ketu as Nakshatra lord or Sublord**: When `calculateNadiNumbers` encounters Rahu or Ketu as a planet's nak lord or sub lord, apply the same Nadi special logic (conjunctions, aspects, sign lord, bhavchalit position) to compute their house numbers instead of returning empty/zero
+- User account system: Login with Internet Identity. Logged-in users can save their current birth details (date, time, place, lat, lon) to backend and reload them on any device.
+- Event selector dropdown in Horoscope tab above/below the Dasa panel: 24 events (Normal, Abortion, Aggression, Accident, Arrest, Award, Bail, Career, Change in Career, Child Birth, Cold Nature, Coming Home, Depression, Divorce, Education, Health, Litigation, Litigation Win, Love, Marriage, Property Purchase, Property Sale, Transfer, Travel, Vehicle Purchase, Vehicle Sale).
+- When event selected: chart house numbers change color per event rules (see rules below). Also in all event analysis tables, planet/nakshatra/sublord numbers are colored per the selected event's rules.
+- Event color rules applied to SVG chart house number labels and to numbers in event tables.
 
 ### Modify
-- **House number direction — anticlockwise**: Fix `HOUSE_GRID` in `NorthIndianChart.tsx` so houses go COUNTER-CLOCKWISE starting from H1 at top-center going LEFT:
-  ```
-  New grid mapping (5-row × 3-col):
-  [ H2 ][ H1 ][ H12 ]   ← top row
-  [ H3 ][    ][ H11 ]   ← row 2
-  [ H4 ][    ][ H10 ]   ← row 3
-  [ H5 ][    ][  H9 ]   ← row 4
-  [ H6 ][ H7 ][  H8 ]   ← bottom row
-  ```
-  H1=top-center, H2=top-left (first left from H1), then down the left column: H3, H4, H5, H6, across bottom: H7, up right column: H8, H9, H10, H11, H12=top-right
-- **Sun sublord fix**: In `kpEngine.ts`, compute Sun's nakshatra lord and sublord using the UNCORRECTED sidereal longitude (before applying `SUN_KP_OLD_CORRECTION`). This way the display shows the corrected degree (~20°40') but the nakshatra/sublord are computed from the raw sidereal value (~22°40'), placing Sun in the Sun-sublord zone of Shravana nakshatra.
+- Dasa calculation: add +3 day empirical correction to all dasha start/end dates (to fix Rahu showing 31-12-2013 instead of 03-01-2014).
+- Nadi Numbers panel: all house numbers displayed in black (remove color variations).
+- NorthIndianChart component: accept optional `eventRule` prop. When provided, color each house number according to the rule instead of default gray.
+- EventAnalysis component: accept optional `activeEventId` prop. When provided, color numbers in all tables according to that event's rules.
 
 ### Remove
-- Bottom 2-tab section from the main page (moved into Tab 2)
+- Nothing removed.
 
 ## Implementation Plan
-1. **kpEngine.ts**:
-   - In the Sun planet calculation block, store both `sunSid` (corrected, for display) and `sunSidRaw` (uncorrected, for nak/sublord lookup). Use `sunSidRaw` when calling `getNakshatra()`, `getNakLord()`, `getSubLord()` for Sun.
-   - Export new function `calculateTransitPlanetPositions(year, month, day, hour, min, lat, lon, tz, ayanamsaType)` that returns `ChartPlanet[]` — same planet position logic, just for a different date. Reuse existing helpers.
-   - In `calculateNadiNumbers` (and `getNadiRowNumbers`/`getOwnedHouses`), when nak lord or sub lord is Rahu or Ketu, apply `getRahuKetuNadiNumbers()` logic instead of `getOwnedHouses()`.
 
-2. **NorthIndianChart.tsx**:
-   - Update `HOUSE_GRID` constant to the anticlockwise layout above.
+### Backend (Motoko)
+- Add `saveChart(data: Text) : async ()` - saves birth details JSON for authenticated caller
+- Add `loadChart() : async ?Text` - returns saved chart data for authenticated caller
+- Uses authorization mixin for identity-based storage (Map<Principal, Text>)
 
-3. **App.tsx**:
-   - Wrap entire output in a 3-tab `<Tabs>` structure.
-   - Tab 1: Move birth form + charts + dasha + nadi here.
-   - Tab 2: Move existing planet/house tables here.
-   - Tab 3: Add transit state (`transitDate`, `transitTime`, `transitPlanets`), date/time inputs, Calculate Transit button, and two side-by-side `NorthIndianChart` components (natal mode + transit mode). Transit chart uses natal cusps but shows transit planets. Pass `transitPlanets` to chart.
-   - NorthIndianChart already supports `mode` prop; add `mode="transit"` or reuse `mode="natal"` with a `transitPlanets` override prop.
+### Frontend
+1. **Auth**: Add login/logout button (Internet Identity). Show saved chart load button when logged in.
+2. **Dasa fix**: In kpEngine.ts `calculateDasha()`, add `DASHA_CORRECTION_MS = 3 * 24 * 60 * 60 * 1000` offset to all generated start/end dates.
+3. **Nadi Numbers**: Change number color to `#000000` (black) for all displayed numbers.
+4. **Event selector**: Add a `<select>` dropdown in the Horoscope tab (after charts, before Dasa panel). State: `activeEventId` (default 'normal').
+5. **Chart coloring**: Pass `activeEventId` to NorthIndianChart. Map house numbers to colors based on event rules. Chart house number color: red/green/blue/orange/pink/default gray.
+6. **Event tables coloring**: Pass `activeEventId` to EventAnalysis. In the event tables, color the numbers in planet/nak/sublord cells according to active event rules.
+
+### Event Color Rules (for chart house numbers)
+- Normal: all gray (no change)
+- Abortion: 1,4,6,8,10,12=red; 2,5,9,11=green
+- Aggression: 7,8,12=red; Mars planet=red
+- Accident: 4,6,8,12=red
+- Arrest: 2,3,8,12=red; Rahu,Ketu=red
+- Award: 10,11=green; 6,8,12=red
+- Bail: 10,11=green; 6,8,12=red
+- Career: 10,11=green; 6,8,12=red
+- Change in Career: 5,9=green; Sun,Rahu,Ketu,Saturn=green
+- Child Birth: 2,5,11=green; 1,4,10=red; 6,8,12=orange
+- Cold Nature: 2,5,9,11=green; 1,4,6,10=red
+- Coming Home: 2,4,11=green
+- Depression: 1,2,6,8=red
+- Divorce: 1,6,8,10,12=red; 2,5,7,9,11=green
+- Education: 6,8,12=red; 2,4,5,9,11=green
+- Health: 5,9,11=green; 6,8,12=red
+- Litigation: 6,8,12=red; 10,11=green
+- Litigation Win: 6,8,12=red; 10,11=green
+- Love: 5,8,12=green
+- Marriage: 2,7,11=green; 1,6,10=red; 5,9=blue
+- Property Purchase: 4,11=green; 6,8,12=pink
+- Property Sale: 3,5,10=green; 11=blue
+- Transfer: 3,9,12=green
+- Travel: 3,9,12=green; Rahu,Ketu,Saturn,Sun=green
+- Vehicle Purchase: 4,11=green; 6,8,12=pink; Venus=green
+- Vehicle Sale: 3,5,10=green; Venus=green

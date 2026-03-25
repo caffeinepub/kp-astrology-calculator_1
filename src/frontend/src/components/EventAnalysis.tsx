@@ -161,7 +161,6 @@ function classifyNumbers(
 }
 
 function bilingualName(name: string): string {
-  // name could be full English name like "Sun", "Moon" etc. or abbr
   const engToAbbr: Record<string, string> = {
     Sun: "Su",
     Moon: "Mo",
@@ -182,11 +181,13 @@ function bilingualName(name: string): string {
 function NumbersCell({
   numbers,
   cat,
+  activeEventColors,
 }: {
   numbers: number[];
   cat: CategoryColor;
+  activeEventColors?: Record<number, string>;
 }) {
-  const color = CAT_COLORS[cat];
+  const defaultColor = CAT_COLORS[cat];
   if (numbers.length === 0) {
     return (
       <td style={styles.cell}>
@@ -196,8 +197,18 @@ function NumbersCell({
   }
   return (
     <td style={styles.cell}>
-      <span style={{ color, fontWeight: 700, fontSize: "12px" }}>
-        {numbers.join(", ")}
+      <span style={{ fontWeight: 700, fontSize: "12px" }}>
+        {numbers.map((n, i) => {
+          const color = activeEventColors?.[n]
+            ? activeEventColors[n]
+            : defaultColor;
+          return (
+            <span key={n} style={{ color }}>
+              {n}
+              {i < numbers.length - 1 ? ", " : ""}
+            </span>
+          );
+        })}
       </span>
     </td>
   );
@@ -206,9 +217,11 @@ function NumbersCell({
 function PlanetBlock({
   np,
   rule,
+  activeEventColors,
 }: {
   np: NadiPlanet;
   rule: EventRule;
+  activeEventColors?: Record<number, string>;
 }) {
   const planetColor = PLANET_COLORS[np.abbr] || "#555";
   const hiName = HINDI_NAME[np.abbr] || np.abbr;
@@ -292,14 +305,31 @@ function PlanetBlock({
                   >
                     {row.label}
                   </td>
-                  <NumbersCell numbers={classified.good} cat="good" />
-                  <NumbersCell numbers={classified.supporter} cat="supporter" />
-                  <NumbersCell numbers={classified.bad} cat="bad" />
+                  <NumbersCell
+                    numbers={classified.good}
+                    cat="good"
+                    activeEventColors={activeEventColors}
+                  />
+                  <NumbersCell
+                    numbers={classified.supporter}
+                    cat="supporter"
+                    activeEventColors={activeEventColors}
+                  />
+                  <NumbersCell
+                    numbers={classified.bad}
+                    cat="bad"
+                    activeEventColors={activeEventColors}
+                  />
                   <NumbersCell
                     numbers={classified.supporterBad}
                     cat="supporterBad"
+                    activeEventColors={activeEventColors}
                   />
-                  <NumbersCell numbers={classified.neutral} cat="neutral" />
+                  <NumbersCell
+                    numbers={classified.neutral}
+                    cat="neutral"
+                    activeEventColors={activeEventColors}
+                  />
                 </tr>
               );
             })}
@@ -328,9 +358,13 @@ const styles: Record<string, React.CSSProperties> = {
 
 interface Props {
   nadiPlanets: NadiPlanet[];
+  activeEventColors?: Record<number, string>;
 }
 
-export default function EventAnalysis({ nadiPlanets }: Props) {
+export default function EventAnalysis({
+  nadiPlanets,
+  activeEventColors,
+}: Props) {
   const scrollToSection = (id: string) => {
     document
       .getElementById(`event-${id}`)
@@ -563,7 +597,12 @@ export default function EventAnalysis({ nadiPlanets }: Props) {
                 </thead>
                 <tbody>
                   {nadiPlanets.map((np) => (
-                    <PlanetBlock key={np.abbr} np={np} rule={ev.rule} />
+                    <PlanetBlock
+                      key={np.abbr}
+                      np={np}
+                      rule={ev.rule}
+                      activeEventColors={activeEventColors}
+                    />
                   ))}
                 </tbody>
               </table>
